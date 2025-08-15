@@ -1,0 +1,98 @@
+.usuarios-page {
+  padding: 25px;
+  background-color: #f5f7fb;
+  min-height: 100vh;
+}
+
+.resumen-box {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 25px;
+  flex-wrap: wrap;
+}
+
+.card-resumen {
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  flex: 1;
+  min-width: 180px;
+}
+
+.card-resumen h3 {
+  font-size: 22px;
+  margin-top: 5px;
+}
+
+.card-resumen.disponible { border-top: 4px solid #28a745; }
+.card-resumen.inactivos { border-top: 4px solid #6c757d; }
+.card-resumen.espera { border-top: 4px solid #ffc107; }
+
+.tabla-personal {
+  background: white;
+  border-radius: 12px;
+  padding: 25px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  overflow-x: auto;
+}
+
+.usuario-box {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.usuario-box .ci {
+  font-size: 12px;
+  color: #666;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 15px;
+  font-size: 14px;
+}
+
+thead {
+  background-color: #f1f3f6;
+}
+
+th, td {
+  padding: 10px;
+  text-align: left;
+}
+
+.estado {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.estado.disponible { background: #d4edda; color: #155724; }
+.estado.ocupado { background: #cce5ff; color: #004085; }
+.estado.baja-media {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.estado.suspendido { background: #f5c6cb; color: #721c24; }
+.estado.vencido { background: #f5c6cb; color: #721c24; }
+.estado.espera { background: #fff3cd; color: #856404; }
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.page {
+  background-color: #eee;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}

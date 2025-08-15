@@ -1,0 +1,47 @@
+.layout-container {
+    display: flex;
+    height: 100vh;
+    width: 100%;
+}
+
+
+.sidebar {
+    min-width: 220px;
+    background-color: #ffffff;
+    border-right: 1px solid #ddd;
+    height: 100vh;
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 10;
+}
+
+
+.main-area {
+    margin-left: 220px; 
+    display: flex;
+    flex-direction: column;
+    width: calc(100% - 220px);
+    height: 100vh;
+}
+
+
+.topbar {
+    height: 60px;
+    background-color: #fff;
+    border-bottom: 1px solid #ddd;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    position: sticky;
+    top: 0;
+    z-index: 9;
+}
+
+
+.page-content {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 20px;
+    background-color: #f8f9fc;
+}

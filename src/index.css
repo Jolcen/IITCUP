@@ -1,0 +1,19 @@
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  margin: 0;
+
+  --primary-color: #092C4C;
+  --secondary-color: #F2994A;
+  --secondary-dark-color: color-mix(in srgb, #f55 90%, #000 );
+  --secondary-light-color: color-mix(in srgb, #f55 65%, #fff 20%);
+  --third-color: #ddd;
+  --contrast-color: #fff;
+  --text-color: #333;
+
+
+}
+
+*{
+  box-sizing: border-box;
+  text-decoration: none;
+}

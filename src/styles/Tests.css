@@ -1,0 +1,96 @@
+.contenedor-tests {
+    padding: 3rem;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 0 10px #00000010;
+    max-width: 1000px;
+    margin: auto;
+    text-align: center;
+    margin-top: 10%;
+    width: 80%;
+}
+
+.contenedor-tests h3{
+    font-size: 2.5rem;
+    color: var(--secondary-color);
+    font-weight: bold;
+}
+
+
+.grid-tests {
+    display: flex;
+    justify-content: space-between;
+    gap: 3rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.card-test {
+    position: relative;
+    flex: 1 1 180px;
+    max-width: 200px;
+    text-align: center;
+    cursor: pointer;
+    border-radius: 8px;
+    overflow: hidden;
+    transition: transform 0.2s;
+}
+
+.card-test:hover {
+    transform: scale(1.03);
+}
+
+
+.card-test img {
+    width: 110%;
+    height: 20rem;
+    display: block;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+}
+
+.card-test p {
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin-top: 0.5rem;
+}
+
+.card-test .overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    transition: opacity 0.2s;
+    border-radius: 8px;
+}
+
+.card-test:hover .overlay {
+    opacity: 1;
+}
+
+/* Cuando está seleccionada */
+.card-test.seleccionado .overlay {
+    opacity: 1;
+    background: rgba(0, 123, 255, 0.4);
+    border: 2px solid #007bff;
+}
+
+
+.btn-test {
+    background-color: var(--secondary-color);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.btn-test:hover {
+    background-color: #d96c06;
+}

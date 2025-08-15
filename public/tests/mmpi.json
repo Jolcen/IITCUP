@@ -1,0 +1,13 @@
+{
+    "test": "MMPI-2",
+    "titulo": "Minnesota Multiphasic Personality Inventory - 2",
+    "instrucciones": "Lee con atención cada afirmación y selecciona Verdadero o Falso.",
+    "opciones": ["Verdadero", "Falso"],
+    "preguntas": [
+        { "id": 1, "texto": "Me siento nervioso la mayor parte del tiempo." },
+        { "id": 2, "texto": "Nunca he tenido pensamientos de hacerme daño." },
+        { "id": 3, "texto": "Hay personas que tratan de perjudicarme." },
+        { "id": 4, "texto": "A veces oigo voces que otros no oyen." },
+        { "id": 5, "texto": "Me resulta difícil tomar decisiones." }
+    ]
+}

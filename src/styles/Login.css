@@ -1,0 +1,131 @@
+body{
+    margin: 0;
+}
+
+
+.login-bg {
+    background-color: var(--primary-color);
+    width: 100dvw;
+    height: 100dvh;
+    display: grid;
+    place-items: center;
+}
+
+.login-container {
+    display: grid;
+    grid-template-columns: 0.8fr 1.2fr;
+    width: 80%;
+    height: auto;
+    background-color: #fff;
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.login-image{
+    width: 100%;
+}
+
+.login-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+    border-radius: 12px 0 0 12px;
+}
+
+.login-form {
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2rem;
+
+}
+
+.login-logo{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.login-form .logo {
+    width: 50px;
+    background-color: var(--primary-color);
+    border-radius: 10px;
+}
+
+.login-form h3 {
+    text-align: center;
+    color: var(--secondary-color);
+    margin: 0;
+    font-size: 40px;
+}
+
+.login-form h5 {
+    font-size: 12px;
+    text-align: center;
+    justify-content: center;
+    color: #9CA3AF;
+    margin-bottom: 2rem;
+    margin-top: 0;
+}
+
+.login-form input {
+    padding: 0.8rem;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-size: 0.7rem;
+    width: 100%;
+}
+
+.form-options {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.5rem;
+    color: #555;
+    margin-bottom: 2rem;
+}
+
+.form-options a{
+    color: #092C4C;
+}
+
+.form-options a:hover{
+    color: #092c4cad;
+}
+
+.form-options label{
+    align-items: center;
+    display: flex;
+}
+
+.btn-login {
+    padding: 0.8rem;
+    background-color: #092C4C;
+    color: white;
+    font-weight: bold;
+    font-size: 12px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.btn-login:hover {
+    background-color: #0b3a63cc;
+}
+
+.register-link {
+    text-align: center;
+    font-size: 0.7rem;
+    color: #333;
+}
+
+.register-link a {
+    color: #092C4C;
+    font-weight: bold;
+    text-decoration: none;
+}
+
+.register-link a:hover{
+    color: #092c4cb4;
+
+}

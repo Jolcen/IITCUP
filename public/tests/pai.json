@@ -1,0 +1,13 @@
+{
+    "test": "PAI",
+    "titulo": "Personality Assessment Inventory",
+    "instrucciones": "Responde de forma honesta. Marca cuánto te representa cada afirmación.",
+    "opciones": ["Nada", "Poco", "Algo", "Mucho"],
+    "preguntas": [
+        { "id": 1, "texto": "Me siento triste la mayor parte del tiempo." },
+        { "id": 2, "texto": "Me resulta difícil confiar en otras personas." },
+        { "id": 3, "texto": "Evito situaciones sociales porque me siento incómodo." },
+        { "id": 4, "texto": "Siento que no tengo control sobre mi vida." },
+        { "id": 5, "texto": "Me enojo con facilidad, incluso por cosas pequeñas." }
+    ]
+}

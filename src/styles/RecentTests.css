@@ -1,0 +1,52 @@
+.recent-tests {
+    flex: 1;
+    background-color: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    overflow-x: auto;
+}
+
+.recent-tests h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 15px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+th, td {
+    padding: 10px 12px;
+    text-align: left;
+}
+
+th {
+    background-color: #f1f3f6;
+    color: #333;
+}
+
+tr:nth-child(even) {
+    background-color: #fafafa;
+}
+
+.estado {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.estado.finalizado {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.estado.pendiente {
+    background-color: #f8d7da;
+    color: #721c24;
+}

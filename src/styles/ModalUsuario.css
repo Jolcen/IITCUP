@@ -1,0 +1,86 @@
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+}
+
+.modal-usuario {
+  background: white;
+  border-radius: 12px;
+  padding: 25px;
+  width: 90%;
+  max-width: 700px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.usuario-header {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.usuario-header img {
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+}
+
+.form-grid {
+  display: flex;
+  gap: 30px;
+}
+
+.col {
+  flex: 1;
+}
+
+.col label {
+  font-weight: 600;
+  font-size: 14px;
+  display: block;
+  margin-top: 10px;
+}
+
+.col input,
+.col select {
+  width: 100%;
+  padding: 8px 12px;
+  margin-top: 5px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 25px;
+}
+
+.btn-aceptar {
+  background: #28a745;
+  color: white;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 6px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.btn-rechazar {
+  background: #dc3545;
+  color: white;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 6px;
+  font-weight: bold;
+  cursor: pointer;
+}

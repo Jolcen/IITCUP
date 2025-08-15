@@ -1,0 +1,13 @@
+.pie-box {
+    flex: 1;
+    background-color: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.pie-box h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 15px;
+}

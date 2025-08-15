@@ -1,0 +1,112 @@
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.4);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-form {
+    background-color: #fff;
+    width: 90%;
+    max-width: 960px;
+    border-radius: 12px;
+    padding: 30px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 0 12px rgba(0, 0, 0, 0.2);
+}
+
+.modal-form h3 {
+    font-size: 20px;
+    margin-bottom: 20px;
+}
+
+.tipo-evaluacion {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 25px;
+}
+
+.btn-tipo {
+    padding: 10px 20px;
+    border: 2px solid #f0ad4e;
+    border-radius: 8px;
+    background-color: white;
+    cursor: pointer;
+    font-weight: 600;
+    color: #f0ad4e;
+    transition: all 0.2s;
+}
+
+.btn-tipo.active,
+.btn-tipo:hover {
+    background-color: #f0ad4e;
+    color: white;
+}
+
+.form-grid {
+    display: flex;
+    gap: 30px;
+    flex-wrap: wrap;
+}
+
+.col {
+    flex: 1;
+    min-width: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+label {
+    font-weight: 600;
+    margin-top: 10px;
+    font-size: 14px;
+}
+
+input,
+select,
+textarea {
+    padding: 8px 12px;
+    font-size: 14px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    outline: none;
+    width: 100%;
+}
+
+textarea {
+    resize: vertical;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 25px;
+    gap: 10px;
+}
+
+.btn-cancelar {
+    padding: 10px 18px;
+    background-color: #dee2e6;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.btn-guardar {
+    padding: 10px 18px;
+    background-color: #0d6efd;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+}
