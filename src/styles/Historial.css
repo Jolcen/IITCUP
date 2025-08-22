@@ -105,3 +105,112 @@ tr:nth-child(even) {
     border-radius: 6px;
     cursor: pointer;
 }
+
+/* Overlay y contenedor del modal */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  width: min(1100px, 94vw);
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 15px 50px rgba(0,0,0,.25);
+  padding: 18px 22px 22px;
+  height: 60%;
+}
+
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.modal-head .close {
+  border: none; background: transparent; font-size: 20px; cursor: pointer;
+}
+
+.muted { color: #64748b; margin: 0 0 12px; }
+
+/* Fila de tarjetas como en la imagen */
+.tests-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+  padding: 8px 6px 0;
+  height: 60%;
+}
+
+.test-card {
+  position: relative;
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 10px;
+  border: 2px solid transparent;
+  text-align: center;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.test-card img {
+  width: 100%;
+  height: 60%;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.test-title { font-size: .92rem; margin-top: 8px; min-height: 40px; color:#0f172a; }
+.test-card:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(0,0,0,.06); }
+
+/* PAI seleccionado en verde */
+.test-card.selected { border-color: #16a34a; background: #effaf1; }
+.badge-green {
+  position: absolute; top: 10px; left: 10px;
+  background: #16a34a; color: #fff; padding: 4px 8px;
+  border-radius: 999px; font-size: .75rem; font-weight: 600;
+}
+
+/* Botones */
+.btn-primary {
+  background: #f59e0b; color: #fff; border: none; border-radius: 10px;
+  padding: 10px 16px; font-weight: 600; cursor: pointer;
+}
+.btn-primary:hover { filter: brightness(0.95); }
+.modal-actions { display: flex; justify-content: center; margin-top: 16px; }
+
+/* Botón/ícono en la tabla */
+.btn-link {
+  border: none; background: transparent; cursor: pointer; font-size: 18px;
+}
+
+/* Overlay base */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+.modal-overlay.nested { background: rgba(0,0,0,.35); z-index: 1100; }
+
+.modal { width: min(1100px, 94vw); background: #fff; border-radius: 14px; box-shadow: 0 15px 50px rgba(0,0,0,.25); padding: 18px 22px 22px; }
+.modal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; }
+.modal-head .close { border:none; background:transparent; font-size:20px; cursor:pointer; }
+.muted { color:#64748b; margin: 0 0 12px; }
+
+/* Tarjetas pruebas */
+.tests-row { display:grid; grid-template-columns: repeat(4,1fr); gap:18px; padding: 8px 6px 0; }
+.test-card { position:relative; background:#f8fafc; border-radius:12px; padding:10px; border:2px solid transparent; text-align:center; transition:transform .15s ease, box-shadow .15s ease; }
+.test-card img { width:100%; height:160px; object-fit:cover; border-radius:8px; }
+.test-title { font-size:.92rem; margin-top:8px; min-height:40px; color:#0f172a; }
+.test-card:hover { transform: translateY(-2px); box-shadow:0 6px 14px rgba(0,0,0,.06); }
+.test-card.selected { border-color:#16a34a; background:#effaf1; }
+.badge-green { position:absolute; top:10px; left:10px; background:#16a34a; color:#fff; padding:4px 8px; border-radius:999px; font-size:.75rem; font-weight:600; }
+
+.btn-primary { background:#f59e0b; color:#fff; border:none; border-radius:10px; padding:10px 16px; font-weight:600; cursor:pointer; }
+.btn-primary:hover { filter:brightness(0.95); }
+.modal-actions { display:flex; justify-content:center; margin-top:16px; }
+
+.btn-link { border:none; background:transparent; cursor:pointer; font-size:18px; }
+
+/* Sub-modal resultado */
+.result-modal { width: min(620px, 92vw); height: 70%;}
+.result-body { display:flex; justify-content:center; padding:10px 0 8px; }
+.result-img { max-width: 460px; width: 100%; border: 3px solid #60a5fa; border-radius: 8px; }
+.result-actions { display:flex; gap:12px; justify-content:center; margin-top: 8px; }
+.btn-soft { background:#f3f4f6; border:1px solid #e5e7eb; padding:8px 12px; border-radius:10px; cursor:pointer; }
+.btn-soft:hover { background:#e5e7eb; }

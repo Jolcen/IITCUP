@@ -72,7 +72,32 @@ export default function TestViewer() {
     };
 
     if (!testData) return <div className="loader">Cargando prueba...</div>;
-    if (currentIndex >= testData.preguntas.length) return <div className="fin">✅ Prueba completada</div>;
+    
+    if (currentIndex >= testData.preguntas.length) {
+    // opcional: borrar progreso guardado de esta prueba
+    localStorage.removeItem(`progress-${testId}`);
+
+    return (
+        <div className="finish-wrap">
+        <div className="finish-card">
+            <div className="finish-icon">✅</div>
+            <h1 className="finish-title">¡Prueba completada!</h1>
+
+            {/* Datos opcionales */}
+            
+
+            <div className="finish-actions">
+            <button
+                className="btn-back"
+                onClick={() => navigate('/evaluaciones')}
+            >
+                ← Volver a Evaluaciones
+            </button>
+            </div>
+        </div>
+        </div>
+    );
+    }
 
     const pregunta = testData.preguntas[currentIndex];
     const progreso = Math.round((currentIndex / testData.preguntas.length) * 100);

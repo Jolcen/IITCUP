@@ -1,120 +1,146 @@
-import { useState } from "react"
-import ModalUsuario from "../components/ModalUsuario"
-import "../styles/Usuarios.css"
+// src/pages/Usuarios.jsx
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../lib/supabaseClient";
+import ModalUsuario from "../components/ModalUsuario";
+import "../styles/Usuarios.css";
 
-const usuariosMock = [
-    {
-        nombre: "Juan Carlos Mamani Choque",
-        ci: "348921 LP",
-        email: "juanchoque@gmail.com",
-        especialidad: "Clínica",
-        nivel: "Perito",
-        fecha: "26/04/2025",
-        turno: "Mañana",
-        casos: 48,
-        estado: "Disponible",
-    },
-    {
-        nombre: "Miguel Choque Flores",
-        ci: "201122 LP",
-        email: "miguel@gmail.com",
-        especialidad: "Forense",
-        nivel: "Secundaria",
-        fecha: "26/04/2025",
-        turno: "Tarde",
-        casos: 0,
-        estado: "Espera",
-    },
-    {
-        nombre: "Luis Vargas Céspedes",
-        ci: "489205 LP",
-        email: "luisvargas@gmail.com",
-        especialidad: "Educativa",
-        nivel: "Perito",
-        fecha: "26/04/2025",
-        turno: "Noche",
-        casos: 12,
-        estado: "Disponible",
-    },
-    {
-        nombre: "Ana Tardío Guarachi",
-        ci: "829140 LP",
-        email: "anatardio@gmail.com",
-        especialidad: "Forense",
-        nivel: "Perito",
-        fecha: "26/04/2025",
-        turno: "Tarde",
-        casos: 52,
-        estado: "Ocupado",
+export default function Usuarios() {
+  const [filas, setFilas] = useState([]);
+  const [q, setQ] = useState("");
+  const [cargando, setCargando] = useState(true);
+  const [err, setErr] = useState("");
+  const [usuarioSeleccionado, setUsuarioSeleccionado] = useState(null);
+  const [modoModal, setModoModal] = useState("ver");
+
+  async function cargar() {
+    setCargando(true);
+    setErr("");
+    const { data, error } = await supabase.rpc("admin_list_app_users");
+    if (error) {
+      setErr(error.message || "No se pudo cargar usuarios");
+      setFilas([]);
+    } else {
+      setFilas(data || []);
     }
-    ]
+    setCargando(false);
+  }
 
-    export default function Usuarios() {
-    const [usuarioSeleccionado, setUsuarioSeleccionado] = useState(null)
+  useEffect(() => { cargar(); }, []);
 
-    return (
-        <div className="usuarios-page">
-        <h2>Usuarios</h2>
+  // Filtro por nombre/email/rol
+  const filtradas = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return filas;
+    return filas.filter((u) =>
+      (u.nombre || "").toLowerCase().includes(term) ||
+      (u.email  || "").toLowerCase().includes(term) ||
+      (u.rol    || "").toLowerCase().includes(term)
+    );
+  }, [q, filas]);
 
-        <div className="resumen-box">
-            <div className="card-resumen"><p>Total de usuarios</p><h3>1,248</h3></div>
-            <div className="card-resumen disponible"><p>Usuarios disponibles</p><h3>47</h3></div>
-            <div className="card-resumen inactivos"><p>Usuarios Inactivos</p><h3>3</h3></div>
-            <div className="card-resumen espera"><p>Usuarios en espera</p><h3>1</h3></div>
-        </div>
+  const abrirCrearUsuario = () => {
+    setModoModal("crear");
+    setUsuarioSeleccionado({
+      nombre: "", email: "", rol: "operador",
+      // campos extra para tu modal si los necesitas:
+      ci: "", especialidad: "", nivel: "", turno: "", estado: "Disponible", password: ""
+    });
+  };
 
-        <div className="tabla-personal">
+  const abrirVerUsuario = (u) => {
+    setModoModal("ver");
+    setUsuarioSeleccionado(u);
+  };
+
+  return (
+    <div className="usuarios-page">
+      <div className="tabla-personal">
+        <div className="tabla-header">
+          <div>
             <h3>PERSONAL</h3>
             <p>Gestión del personal de las pruebas psicológicas</p>
+          </div>
 
-            <table>
-            <thead>
-                <tr>
-                <th>Personal</th>
-                <th>Especialidad</th>
-                <th>Nivel</th>
-                <th>Fecha Ingr.</th>
-                <th>Turno</th>
-                <th>Casos</th>
-                <th>Estado</th>
-                </tr>
-            </thead>
-            <tbody>
-                {usuariosMock.map((u, i) => (
-                <tr key={i} onClick={() => setUsuarioSeleccionado(u)}>
-                    <td>
-                    <div className="usuario-box">
-                        <span className="icon">👤</span>
-                        <div>
-                        {u.nombre}
-                        <div className="ci">{u.ci}</div>
-                        </div>
-                    </div>
-                    </td>
-                    <td>{u.especialidad}</td>
-                    <td>{u.nivel}</td>
-                    <td>{u.fecha}</td>
-                    <td>{u.turno}</td>
-                    <td>{u.casos}</td>
-                    <td><span className={`estado ${u.estado.toLowerCase()}`}>{u.estado}</span></td>
-                </tr>
-                ))}
-            </tbody>
-            </table>
-
-            <div className="pagination">
-            {["◀", 1, 2, 3, 4, 5, "▶"].map((p, i) => (
-                <span key={i} className="page">{p}</span>
-            ))}
-            </div>
-        </div>
-
-        {usuarioSeleccionado && (
-            <ModalUsuario
-            usuario={usuarioSeleccionado}
-            onClose={() => setUsuarioSeleccionado(null)}
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <input
+              className="input-buscar"
+              placeholder="Buscar…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              style={{ padding: "8px 10px", border: "1px solid #e5e7eb", borderRadius: 8 }}
             />
-        )}
+            <button className="btn-primario" onClick={abrirCrearUsuario}>➕ Registrar usuario</button>
+          </div>
         </div>
-    )
+
+        <div className="tabla-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Email</th>
+                <th>Rol</th>
+                <th>Creado</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {cargando && (
+                <tr><td colSpan={4} style={{ padding: 16 }}>Cargando…</td></tr>
+              )}
+
+              {!cargando && err && (
+                <tr><td colSpan={4} style={{ padding: 16, color: "crimson" }}>{err}</td></tr>
+              )}
+
+              {!cargando && !err && filtradas.length === 0 && (
+                <tr><td colSpan={4} style={{ padding: 16 }}>Sin resultados</td></tr>
+              )}
+
+              {!cargando && !err && filtradas.map((u) => (
+                <tr key={u.id} onClick={() => abrirVerUsuario(u)} style={{ cursor: "pointer" }}>
+                  <td>
+                    <div className="usuario-box">
+                      <span className="icon">👤</span>
+                      <div>{u.nombre}</div>
+                    </div>
+                  </td>
+                  <td>{u.email}</td>
+                  <td><RolePill rol={u.rol} /></td>
+                  <td>{new Date(u.creado_en).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {usuarioSeleccionado && (
+        <ModalUsuario
+          modo={modoModal}
+          usuario={usuarioSeleccionado}
+          onClose={() => setUsuarioSeleccionado(null)}
+          onCreated={cargar}    // refresca lista tras crear
+          onUpdated={cargar}
+        />
+      )}
+    </div>
+  );
+}
+
+function RolePill({ rol }) {
+  const map = {
+    administrador: ["#fee2e2", "#b91c1c", "#fecaca"], // bg, fg, border
+    operador:      ["#dbeafe", "#1d4ed8", "#bfdbfe"],
+    asistente:     ["#e9d5ff", "#7c3aed", "#ddd6fe"],
+  };
+  const [bg, fg, bd] = map[rol] || ["#f1f5f9", "#64748b", "#e2e8f0"];
+  return (
+    <span style={{
+      background: bg, color: fg, border: `1px solid ${bd}`,
+      fontSize: 12, padding: "2px 8px", borderRadius: 999
+    }}>
+      {rol ?? "Sin rol"}
+    </span>
+  );
 }

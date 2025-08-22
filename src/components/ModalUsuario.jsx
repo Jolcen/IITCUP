@@ -1,5 +1,45 @@
 import "../styles/ModalUsuario.css"
 
+async function handleGuardar() {
+    try {
+        const payload = {
+        email: form.email,
+        password: form.password,     // pídesela solo al crear
+        nombre: form.nombre,
+        ci: form.ci,
+        especialidad: form.especialidad,
+        nivel: form.nivel,
+        turno: form.turno,
+        estado: form.estado || "Disponible",
+        };
+
+        const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-staff`,
+        {
+            method: "POST",
+            headers: {
+            "Content-Type": "application/json",
+            "apikey": import.meta.env.VITE_SUPABASE_ANON_KEY,
+            // Opcional: Authorization si quieres validar que quien llama esté logueado
+            // "Authorization": `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+            },
+            body: JSON.stringify(payload),
+        }
+        );
+
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Error creando usuario");
+
+        alert("✅ Usuario creado");
+        onClose?.();            // cierra modal
+        onCreated?.();          // callback para refrescar lista
+    } catch (e) {
+        alert(e.message);
+    }
+}
+
+
+
 export default function ModalUsuario({ usuario, onClose }) {
     return (
         <div className="modal-overlay">

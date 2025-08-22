@@ -1,5 +1,5 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Suspense } from "react";
 import { Login } from "./pages/Login";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
@@ -8,56 +8,75 @@ import Historial from "./pages/Historial";
 import Tests from "./pages/Tests";
 import System from "./pages/System";
 import Usuarios from "./pages/Usuarios";
-import TestViewer from "./pages/TestViewer"; // Importa tu componente
+import TestViewer from "./pages/TestViewer";
+import ProtectedRoute from "./routes/ProtectedRoute";
+import AdminRoute from "./routes/AdminRoute";
+import Forbidden from "./pages/Forbidden";
+import NoAuthRoute from "./routes/NoAuthRoute"; // 👈 nuevo
 
-function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-
-  // Leer estado desde localStorage al iniciar
-  useEffect(() => {
-    const storedAuth = localStorage.getItem("isAuthenticated");
-    if (storedAuth === "true") {
-      setIsAuthenticated(true);
-    }
-  }, []);
-
-  // Guardar estado cada vez que cambie
-  useEffect(() => {
-    localStorage.setItem("isAuthenticated", isAuthenticated);
-  }, [isAuthenticated]);
-
+export default function App() {
   return (
-    <Router>
-      <Routes>
-        {/* Ruta pública de login */}
-        <Route
-          path="/login"
-          element={<Login setIsAuthenticated={setIsAuthenticated} />}
-        />
+    <BrowserRouter basename={import.meta.env.BASE_URL /* útil para GH Pages */}>
+      <Suspense fallback={<div style={{ padding: 24 }}>Cargando…</div>}>
+        <Routes>
+          {/* Pública SOLO si NO hay sesión */}
+          <Route
+            path="/login"
+            element={
+              <NoAuthRoute>
+                <Login />
+              </NoAuthRoute>
+            }
+          />
 
-        {/* Rutas privadas si está autenticado */}
-        {isAuthenticated ? (
-          <>
-            {/* Rutas que usan Layout (sidebar + topbar) */}
-            <Route path="/*" element={<Layout />}>
-              <Route index element={<Dashboard />} />
-              <Route path="evaluaciones" element={<Evaluaciones />} />
-              <Route path="historial" element={<Historial />} />
-              <Route path="prueba" element={<Tests />} />
-              <Route path="sistema" element={<System />} />
-              <Route path="usuarios" element={<Usuarios />} />
-            </Route>
+          {/* Protegidas (con Layout) */}
+          <Route
+            path="/*"
+            element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Dashboard />} />
+            <Route path="evaluaciones" element={<Evaluaciones />} />
+            <Route path="historial" element={<Historial />} />
+            <Route path="prueba" element={<Tests />} />
 
-            {/* Ruta especial para test sin layout */}
-            <Route path="/test/:testId" element={<TestViewer />} />
-          </>
-        ) : (
-          // Si no está autenticado, redirige todo a login
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        )}
-      </Routes>
-    </Router>
+            {/* Solo admin */}
+            <Route
+              path="sistema"
+              element={
+                <AdminRoute>
+                  <System />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="usuarios"
+              element={
+                <AdminRoute>
+                  <Usuarios />
+                </AdminRoute>
+              }
+            />
+          </Route>
+
+          {/* Ruta sin Layout pero protegida */}
+          <Route
+            path="/test/:testId"
+            element={
+              <ProtectedRoute>
+                <TestViewer />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* 403 y fallback */}
+          <Route path="/403" element={<Forbidden />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+    </BrowserRouter>
   );
 }
-
-export default App;
