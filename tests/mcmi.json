@@ -1,0 +1,13 @@
+{
+    "test": "MCMI-IV",
+    "titulo": "Millon Clinical Multiaxial Inventory - IV",
+    "instrucciones": "Indica si cada afirmación es verdadera o falsa según cómo eres normalmente.",
+    "opciones": ["Verdadero", "Falso"],
+    "preguntas": [
+        { "id": 1, "texto": "Me preocupo mucho por lo que los demás piensan de mí." },
+        { "id": 2, "texto": "Disfruto estar solo más que acompañado." },
+        { "id": 3, "texto": "A menudo siento que la gente está en mi contra." },
+        { "id": 4, "texto": "Soy una persona muy perfeccionista." },
+        { "id": 5, "texto": "A veces actúo sin pensar en las consecuencias." }
+    ]
+}
