@@ -12,7 +12,7 @@ import TestViewer from "./pages/TestViewer";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import AdminRoute from "./routes/AdminRoute";
 import Forbidden from "./pages/Forbidden";
-import NoAuthRoute from "./routes/NoAuthRoute"; // 👈 nuevo
+import NoAuthRoute from "./routes/NoAuthRoute"; 
 
 export default function App() {
   return (
