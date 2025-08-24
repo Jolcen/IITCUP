@@ -11,6 +11,7 @@ export default function Topbar() {
   return (
     <div className="topbar">
       <h2>{sectionName.charAt(0).toUpperCase() + sectionName.slice(1)}</h2>
+      {/*
       <div className="topbar-right">
         <div className="search-bar">
           <FaSearch />
@@ -18,6 +19,9 @@ export default function Topbar() {
         </div>
         <FaBell className="icon" />
       </div>
+      */}
+      
+
     </div>
   );
 }

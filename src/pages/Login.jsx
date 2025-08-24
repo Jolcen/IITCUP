@@ -88,12 +88,12 @@ export const Login = ({ setIsAuthenticated }) => {
       <div className="login-container">
 
         <div className="login-image">
-          <img src='/public/static/images/portada.png' alt="Login visual" />
+          <img src='static/images/portada.png' alt="Login visual" />
         </div>
 
         <form className="login-form" onSubmit={handleLogin}>
           <div className="login-logo">
-            <img src="/static/images/logo.png" alt="IITCUP logo" className="logo" />
+            <img src="static/images/logo.png" alt="IITCUP logo" className="logo" />
             <h3>IITCUP</h3>
           </div>
           <h5>Control de Pruebas Psicológicas</h5>

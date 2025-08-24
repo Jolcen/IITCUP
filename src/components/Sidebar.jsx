@@ -84,7 +84,7 @@ export default function Sidebar() {
   return (
     <div className="sidebar">
       <div className="logo">
-        <img src="/static/images/logo.png" alt="Logo" className="logo" />
+        <img src="static/images/logo.png" alt="Logo" className="logo" />
         <h2>IITCUP</h2>
       </div>
 

@@ -1,190 +1,375 @@
-import "../styles/Historial.css"
-import { useState } from "react"
-import { useNavigate } from "react-router-dom"
+import "../styles/Historial.css";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../lib/supabaseClient";
 
-const evaluados = [
-    { nombre: "Carlos Pacheco",  id: "S-001", caso: "Homicidio",  fecha: "10/09/2009", responsable: "Juan Carlos",   resultado: "Asesino",    estado: "En proceso" },
-    { nombre: "Josue Romay",     id: "S-002", caso: "Asesinato",  fecha: "01/10/2024", responsable: "Tatiana Suxo",  resultado: "Adicto",     estado: "Terminado" },
-    { nombre: "Alejandro Atto",  id: "S-003", caso: "Violacion",  fecha: "24/02/2024", responsable: "Mauricio Quispe",resultado: "Inconcluso", estado: "En proceso" },
-    ]
+const PAGE_SIZE = 10;
 
-    export default function Historial() {
-    const [showModal, setShowModal] = useState(false)       // Modal Pruebas
-    const [showReporte, setShowReporte] = useState(false)   // Sub-modal Resultado PAI
-    const [seleccion, setSeleccion] = useState(null)        // { nombre, id }
-    const navigate = useNavigate()
+// iconos/portadas para las pruebas (ajusta paths si usas otros)
+const PRUEBA_IMG = {
+  "PAI": "static/images/pai.jpg",
+  "MCMI-IV": "static/images/mcmi-iv.jpg",
+  "MMPI-2": "static/images/mmpi-2.jpg",
+  "CUSTOM": "static/images/testP.jpg",
+};
 
-    const abrirModal = (row) => {
-        setSeleccion({ nombre: row.nombre, id: row.id })
-        setShowModal(true)
+export default function Historial() {
+  // KPIs
+  const [kpis, setKpis] = useState({ totalCasos: 0, totalPruebasCompletas: 0, loading: true });
+
+  // tabla
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
+
+  // mapas auxiliares (operadores y estado por caso)
+  const [opMap, setOpMap] = useState({});     // { userId -> nombre/email }
+  const [estadoMap, setEstadoMap] = useState({}); // { casoId -> "pendiente"|"en_proceso"|"terminado" }
+
+  // modal pruebas
+  const [showModal, setShowModal] = useState(false);
+  const [selectedCase, setSelectedCase] = useState(null); // fila de casos
+  const [tests, setTests] = useState([]); // [{id,codigo,nombre,img,done}]
+  const [loadingTests, setLoadingTests] = useState(false);
+
+  // sub-modal resultados
+  const [showReporte, setShowReporte] = useState(false);
+  const [reportePrueba, setReportePrueba] = useState(null); // {id, codigo, nombre}
+  const [reporteData, setReporteData] = useState([]); // [{clave,valor}]
+
+  // ---------- KPIs ----------
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        // 1) total de evaluaciones (casos)
+        const r1 = await supabase.from("casos").select("id", { count: "exact", head: true });
+
+        // 2) total de pruebas completadas (intentos cerrados)
+        const r2 = await supabase
+          .from("intentos_prueba")
+          .select("id", { count: "exact", head: true })
+          .not("terminado_en", "is", null);
+
+        if (!alive) return;
+        setKpis({
+          totalCasos: r1.count || 0,
+          totalPruebasCompletas: r2.count || 0,
+          loading: false,
+        });
+      } catch {
+        if (alive) setKpis((k) => ({ ...k, loading: false }));
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // ---------- Carga de tabla paginada ----------
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      const from = (page - 1) * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      // 1) casos de la página
+      const q = supabase
+        .from("casos")
+        .select("id, paciente_nombre, paciente_ci, motivacion, creado_en, asignado_a", { count: "exact" })
+        .order("creado_en", { ascending: false })
+        .range(from, to);
+
+      const { data, error, count } = await q;
+      if (error || !alive) return;
+
+      setRows(data || []);
+      setTotal(count || 0);
+
+      // 2) resolver nombres de responsables (app_users) para los asignado_a de la página
+      const userIds = Array.from(new Set((data || []).map(r => r.asignado_a).filter(Boolean)));
+      if (userIds.length) {
+        const { data: users } = await supabase
+          .from("app_users")
+          .select("id, nombre, email")
+          .in("id", userIds);
+        if (alive && users) {
+          const map = {};
+          users.forEach(u => { map[u.id] = u.nombre || u.email; });
+          setOpMap(map);
+        }
+      } else {
+        setOpMap({});
+      }
+
+      // 3) estado por caso (pendiente / en proceso / terminado) usando intentos en los casos visibles
+      if (data && data.length) {
+        const casoIds = data.map(r => r.id);
+        const { data: intents } = await supabase
+          .from("intentos_prueba")
+          .select("caso_id, terminado_en")
+          .in("caso_id", casoIds);
+
+        if (alive) {
+          const map = {};
+          (intents || []).reduce((acc, it) => {
+            const key = it.caso_id;
+            const arr = acc[key] || (acc[key] = []);
+            arr.push(it);
+            return acc;
+          }, map);
+
+          const emap = {};
+          data.forEach(r => {
+            const list = map[r.id] || [];
+            if (list.length === 0) emap[r.id] = "pendiente";
+            else if (list.some(x => x.terminado_en == null)) emap[r.id] = "en_proceso";
+            else emap[r.id] = "terminado";
+          });
+          setEstadoMap(emap);
+        }
+      } else {
+        setEstadoMap({});
+      }
+    })();
+
+    return () => { alive = false; };
+  }, [page]);
+
+  // ---------- Modal: abrir pruebas de un caso ----------
+  async function abrirModalPruebas(row) {
+    setSelectedCase(row);
+    setShowModal(true);
+
+    setLoadingTests(true);
+    setTests([]);
+
+    try {
+      // todas las pruebas disponibles
+      const { data: pruebas } = await supabase
+        .from("pruebas")
+        .select("id, codigo, nombre")
+        .order("nombre");
+
+      // intentos del caso (para marcar completadas)
+      const { data: intents } = await supabase
+        .from("intentos_prueba")
+        .select("prueba_id, terminado_en")
+        .eq("caso_id", row.id);
+
+      const terminadas = new Set(
+        (intents || []).filter(i => i.terminado_en != null).map(i => i.prueba_id)
+      );
+
+      const list = (pruebas || []).map(p => ({
+        id: p.id,
+        codigo: p.codigo,
+        nombre: p.nombre,
+        img: PRUEBA_IMG[p.codigo] || PRUEBA_IMG.CUSTOM,
+        done: terminadas.has(p.id),
+      }));
+
+      setTests(list);
+    } finally {
+      setLoadingTests(false);
     }
-    const cerrarModal = () => setShowModal(false)
+  }
 
-    // Al hacer clic en la tarjeta PAI (no el botón naranja)
-    const abrirReportePAI = () => setShowReporte(true)
-    const cerrarReportePAI = () => setShowReporte(false)
+  function cerrarModal() {
+    setShowModal(false);
+    setSelectedCase(null);
+    setTests([]);
+    setShowReporte(false);
+    setReportePrueba(null);
+    setReporteData([]);
+  }
 
-    const realizarPAI = () => {
-        if (!seleccion) return
-        navigate(`/pruebas?test=PAI&patient=${encodeURIComponent(seleccion.nombre)}&eval=${seleccion.id}`)
-    }
+  // ---------- Sub-modal: resultados de una prueba ----------
+  async function abrirResultados(prueba) {
+    if (!prueba?.done || !selectedCase) return;
+    setReportePrueba(prueba);
+    setShowReporte(true);
 
-    // Exportaciones básicas de ejemplo
-    const exportarExcel = () => {
-        const csv = "escala,t_score\nDEP,68\nANX,62\nPAR,58\n";
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url; a.download = "resultado_pai.csv"; a.click()
-        URL.revokeObjectURL(url)
-    }
-    const exportarPDF = () => {
-    const html = `
-        <html><head><title>Resultado PAI</title></head>
-        <body style="margin:0;padding:24px;font-family:sans-serif">
-        <h3>Resultado del test PAI</h3>
-        <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTuAAYUyvAatIM7Ol7a824BzJg2Yb_eaEsbTQ&s" style="max-width:100%;height:auto"/>
-        <script>window.print();</script>
-        </body></html>`;
-    
-    const blob = new Blob([html], { type: "text/html" })
-    const url = URL.createObjectURL(blob)
-    window.open(url, "_blank")
-    }
+    // intenta traer puntajes si los tienes
+    const { data } = await supabase
+      .from("puntajes")
+      .select("clave, valor")
+      .eq("caso_id", selectedCase.id)
+      .eq("prueba_id", prueba.id)
+      .order("clave");
 
+    setReporteData(data || []);
+  }
+  function cerrarResultados() {
+    setShowReporte(false);
+    setReportePrueba(null);
+    setReporteData([]);
+  }
 
-    return (
-        <div className="historial-page">
-        <h2>Historial de Evaluados</h2>
+  // ---------- Render ----------
+  const pages = useMemo(() => {
+    const max = 5;
+    const start = Math.max(1, page - Math.floor(max / 2));
+    const end = Math.min(totalPages, start + max - 1);
+    const arr = [];
+    for (let i = start; i <= end; i++) arr.push(i);
+    return arr;
+  }, [page, totalPages]);
 
-        <div className="stats-cards">
-            <div className="card"><p>Evaluados Totales</p><h3>6</h3></div>
-            <div className="card"><p>Evaluados Pendientes</p><h3>1,248</h3></div>
+  return (
+    <div className="historial-page">
+      <h2>Historial de Evaluados</h2>
+
+      {/* KPIs */}
+      <div className="stats-cards">
+        <div className="card">
+          <p>Evaluaciones totales</p>
+          <h3>{kpis.loading ? "…" : kpis.totalCasos}</h3>
+        </div>
+        <div className="card">
+          <p>Pruebas completadas</p>
+          <h3>{kpis.loading ? "…" : kpis.totalPruebasCompletas}</h3>
+        </div>
+      </div>
+
+      {/* Tabla */}
+      <div className="historial-table-container">
+        <div className="table-header">
+          <h4>🧾 Historial de evaluados</h4>
         </div>
 
-        <div className="historial-table-container">
-            <div className="table-header">
-            <h4>🧾 Historial de Evaluados</h4>
-            <select>
-                <option>Últimos 7 días</option>
-                <option>Últimos 30 días</option>
-                <option>Este año</option>
-            </select>
-            </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Identificación</th>
+              <th>Caso</th>
+              <th>Fecha</th>
+              <th>Responsable</th>
+              <th>Estado</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={6} className="muted">Sin registros</td></tr>
+            )}
 
-            <table>
-            <thead>
-                <tr>
-                <th>Identificación</th>
-                <th>Caso</th>
-                <th>Fecha</th>
-                <th>Responsable</th>
-                <th>Resultado</th>
-                <th>Estado</th>
-                <th>Acción</th>
-                </tr>
-            </thead>
-            <tbody>
-                {evaluados.map((e, i) => (
-                <tr key={i}>
-                    <td>
-                    <div className="identificacion">
-                        <span className="icon">🧑‍⚖️</span>
-                        <div>
-                        {e.nombre}
-                        <div className="id-text">ID: {e.id}</div>
-                        </div>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td>
+                  <div className="identificacion">
+                    <span className="icon">🧑‍⚖️</span>
+                    <div>
+                      {r.paciente_nombre}
+                      <div className="id-text">CI: {r.paciente_ci || "—"}</div>
                     </div>
-                    </td>
-                    <td>{e.caso}</td>
-                    <td>{e.fecha}</td>
-                    <td>{e.responsable}</td>
-                    <td>{e.resultado}</td>
-                    <td>
-                    <span className={`estado-tag ${e.estado.toLowerCase().replace(" ", "-")}`}>{e.estado}</span>
-                    </td>
-                    <td>
-                    <button className="btn-link" onClick={() => abrirModal(e)} title="Ver pruebas">📄</button>
-                    </td>
-                </tr>
-                ))}
-            </tbody>
-            </table>
+                  </div>
+                </td>
 
-            <div className="pagination">
-            {["◀", 1, 2, 3, 4, 5, "▶"].map((p, i) => (
-                <span key={i} className="page">{p}</span>
+                <td title={r.motivacion || ""}>{r.motivacion || "—"}</td>
+
+                <td>{r.creado_en ? new Date(r.creado_en).toLocaleDateString() : "—"}</td>
+
+                <td>{r.asignado_a ? (opMap[r.asignado_a] || r.asignado_a) : "—"}</td>
+
+                <td>
+                  <span className={`estado-tag ${
+                    (estadoMap[r.id] || "pendiente").replace("_", "-")
+                  }`}>
+                    {estadoMap[r.id] === "en_proceso" && "En proceso"}
+                    {estadoMap[r.id] === "terminado" && "Terminado"}
+                    {(!estadoMap[r.id] || estadoMap[r.id] === "pendiente") && "Pendiente"}
+                  </span>
+                </td>
+
+                <td>
+                  <button className="btn-link" onClick={() => abrirModalPruebas(r)} title="Ver pruebas">📄</button>
+                </td>
+              </tr>
             ))}
-            </div>
+          </tbody>
+        </table>
+
+        {/* Paginación sin excedentes */}
+        <div className="pagination">
+          <button className="pg" onClick={() => setPage(1)} disabled={page === 1}>«</button>
+          <button className="pg" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>‹</button>
+          {pages.map(n => (
+            <button key={n} className={`pg ${n === page ? "active" : ""}`} onClick={() => setPage(n)}>{n}</button>
+          ))}
+          <button className="pg" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>›</button>
+          <button className="pg" onClick={() => setPage(totalPages)} disabled={page === totalPages}>»</button>
         </div>
+      </div>
 
-        {/* MODAL: PRUEBAS */}
-        {showModal && (
-            <div className="modal-overlay" onClick={cerrarModal}>
-            <div className="modal pruebas-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="modal-head">
-                <h3>Pruebas Psicológicas</h3>
-                <button className="close" onClick={cerrarModal}>✕</button>
-                </div>
-
-                {seleccion && (
-                <p className="muted">
-                    Paciente: <strong>{seleccion.nombre}</strong> · Evaluación <strong>{seleccion.id}</strong>
-                </p>
-                )}
-
-                <div className="tests-row">
-                {/* PAI destacado y clic abre sub-ventana */}
-                <div className="test-card selected" onClick={abrirReportePAI} style={{cursor:"pointer"}}>
-                    <img src="/public/static/images/pai.jpg" alt="PAI" />
-                    <div className="test-title">Personality Assessment Inventory</div>
-                    <span className="badge-green">PAI</span>
-                </div>
-
-                <div className="test-card">
-                    <img src="/public/static/images/mcmi-iv.jpg" alt="MCMI" />
-                    <div className="test-title">Millon Clinical Multiaxial Inventory - IV</div>
-                </div>
-
-                <div className="test-card">
-                    <img src="/public/static/images/mmpi-2.jpg" alt="MMPI-2" />
-                    <div className="test-title">Minnesota Multiphasic Personality Inventory - 2</div>
-                </div>
-
-                <div className="test-card">
-                    <img src="/public/static/images/testP.jpg" alt="Test personalizado" />
-                    <div className="test-title">Test personalizado</div>
-                </div>
-                </div>
-
-                <div className="modal-actions">
-                <button className="btn-primary" onClick={realizarPAI}>Realizar Prueba</button>
-                </div>
-
-                {/* SUB-MODAL: RESULTADO PAI */}
-                {showReporte && (
-                <div className="modal-overlay nested" onClick={cerrarReportePAI}>
-                    <div className="modal result-modal" onClick={(e) => e.stopPropagation()}>
-                    <div className="modal-head">
-                        <h3>Resultado del test PAI</h3>
-                        <button className="close" onClick={cerrarReportePAI}>✕</button>
-                    </div>
-
-                    <div className="result-body">
-                        {/* Usa tu imagen real del reporte */}
-                        <img src="/public/static/images/perfil pai.jpg" alt="Resultado PAI" className="result-img" />
-                    </div>
-
-                    <div className="result-actions">
-                        <button className="btn-soft" onClick={exportarExcel}>📁 Exportar excel</button>
-                        <button className="btn-soft" onClick={exportarPDF}>📄 Exportar pdf</button>
-                    </div>
-                    </div>
-                </div>
-                )}
+      {/* MODAL: PRUEBAS DEL CASO */}
+      {showModal && (
+        <div className="modal-overlay" onMouseDown={(e) => { if (e.target.classList.contains("modal-overlay")) cerrarModal(); }}>
+          <div className="modal pruebas-modal" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>Pruebas psicológicas</h3>
+              <button className="close" onClick={cerrarModal}>✕</button>
             </div>
+
+            {selectedCase && (
+              <p className="muted">
+                Paciente: <strong>{selectedCase.paciente_nombre}</strong> · CI <strong>{selectedCase.paciente_ci || "—"}</strong>
+              </p>
+            )}
+
+            {loadingTests && <div className="muted" style={{padding:12}}>Cargando…</div>}
+
+            <div className="tests-row">
+              {tests.map(t => (
+                <div
+                  key={t.id}
+                  className={`test-card ${t.done ? "done" : ""}`}
+                  onClick={() => abrirResultados(t)}
+                  title={t.done ? "Ver resultados" : "Aún no completada"}
+                >
+                  <img src={t.img} alt={t.codigo} />
+                  <div className="test-title">{t.nombre}</div>
+                  {t.done && <span className="badge-done">✓ Completada</span>}
+                </div>
+              ))}
+              {(!loadingTests && tests.length === 0) && <div className="muted" style={{padding:12}}>No hay pruebas configuradas.</div>}
             </div>
-        )}
+
+            {/* SUB-MODAL: RESULTADOS (placeholder) */}
+            {showReporte && (
+              <div className="modal-overlay nested" onMouseDown={(e) => { if (e.target.classList.contains("modal-overlay")) cerrarResultados(); }}>
+                <div className="modal result-modal" onMouseDown={(e) => e.stopPropagation()}>
+                  <div className="modal-head">
+                    <h3>Resultados · {reportePrueba?.codigo}</h3>
+                    <button className="close" onClick={cerrarResultados}>✕</button>
+                  </div>
+
+                  <div className="result-body">
+                    {reporteData.length > 0 ? (
+                      <table className="table-mini">
+                        <thead><tr><th>Escala</th><th>Valor</th></tr></thead>
+                        <tbody>
+                          {reporteData.map((r, i) => (
+                            <tr key={i}><td>{r.clave}</td><td>{String(r.valor)}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="muted">
+                        Aún no hay resultados calculados para esta prueba. (Aquí irá tu reporte con gráficos / PDF, según el Figma.)
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="result-actions">
+                    <button className="btn-soft" onClick={() => alert("Exportar Excel (pendiente)")}>📁 Exportar Excel</button>
+                    <button className="btn-soft" onClick={() => alert("Exportar PDF (pendiente)")}>📄 Exportar PDF</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-    )
+      )}
+    </div>
+  );
 }

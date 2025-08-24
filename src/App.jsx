@@ -41,7 +41,7 @@ export default function App() {
             <Route index element={<Dashboard />} />
             <Route path="evaluaciones" element={<Evaluaciones />} />
             <Route path="historial" element={<Historial />} />
-            <Route path="prueba" element={<Tests />} />
+            <Route path="tests" element={<Tests />} />
 
             {/* Solo admin */}
             <Route

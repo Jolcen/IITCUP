@@ -1,0 +1,77 @@
+/* Overlay */
+.modal-overlay{
+  position:fixed; inset:0;
+  background: rgba(15,23,42,.35);
+  display:flex; align-items:center; justify-content:center;
+  z-index:1000;
+}
+
+/* Card principal */
+.modal-form{
+  background:#fff; width: min(960px, 94vw);
+  border-radius:16px; box-shadow:0 25px 60px rgba(0,0,0,.18);
+  max-height:90vh; overflow:auto;
+  padding:22px 24px 16px;
+}
+
+/* Header */
+.modal-header{
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:12px;
+}
+.modal-header h3{ margin:0; font-size:20px; }
+
+/* Secciones */
+.sections{ display:flex; flex-direction:column; gap:16px; }
+.card{
+  border:1px solid #eef2f7; border-radius:14px; padding:16px;
+  background:#fafbff;
+}
+.card-title{
+  font-weight:800; color:#0f172a; margin-bottom:10px;
+}
+
+/* Grid de campos */
+.grid{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap:14px 16px;
+}
+.field{ display:flex; flex-direction:column; gap:6px; }
+.field.span-2{ grid-column: 1 / -1; }
+
+label{ font-size:13px; font-weight:700; color:#334155; }
+.req{ color:#ef4444; }
+
+input, select, textarea{
+  width:100%; font-size:14px; border:1px solid #e5e7eb;
+  border-radius:10px; padding:10px 12px; outline:none; background:#fff;
+}
+textarea{ resize:vertical; }
+
+/* Hint */
+.hint{ font-size:12px; color:#64748b; margin-top:4px; }
+
+/* Acciones */
+.modal-actions{
+  display:flex; justify-content:flex-end; gap:10px; margin-top:16px;
+}
+.btn-cancelar{
+  background:#e5e7eb; color:#111827; border:none; border-radius:10px;
+  padding:10px 14px; font-weight:700; cursor:pointer;
+}
+.btn-guardar{
+  background:#2563eb; color:#fff; border:none; border-radius:10px;
+  padding:10px 14px; font-weight:800; cursor:pointer;
+}
+
+/* Error */
+.alert-error{
+  background:#fef2f2; color:#991b1b; border:1px solid #fecaca;
+  border-radius:10px; padding:8px 12px; margin-top:8px;
+}
+
+/* Responsive */
+@media (max-width: 720px){
+  .grid{ grid-template-columns: 1fr; }
+}

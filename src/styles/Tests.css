@@ -1,5 +1,5 @@
 .contenedor-tests {
-    padding: 3rem;
+    padding: 2rem;
     background: #fff;
     border-radius: 12px;
     box-shadow: 0 0 10px #00000010;
@@ -93,4 +93,67 @@
 
 .btn-test:hover {
     background-color: #d96c06;
+}
+
+/* --- Tests.css --- */
+.card-test { 
+  position: relative; 
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+
+/* cuando el usuario la selecciona para realizar */
+.card-test.seleccionado {
+  outline: 2px solid #0ea5e9;
+  box-shadow: 0 0 0 3px rgba(14,165,233,.15) inset;
+}
+
+/* apariencia de pruebas ya completadas */
+.card-test.completado {
+  opacity: .65;
+  cursor: not-allowed;
+}
+.card-test.completado:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+/* el pill verde “Completado” */
+.badge-done {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: #16a34a;            /* verde */
+  color: #fff;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .2px;
+  box-shadow: 0 4px 10px rgba(22,163,74,.25);
+}
+.badge-done::before {
+  content: "✓ ";
+  font-weight: 900;
+}
+
+/* opcional: desaturar imagen cuando está completado */
+.card-test.completado img { filter: grayscale(35%); }
+
+.card-test.done {
+  opacity: 0.55;
+  pointer-events: none;           /* evita clicks sobre una prueba ya terminada */
+  filter: grayscale(0.1);
+}
+
+.card-test .badge-done {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: #16a34a;            /* verde */
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 999px;
+  z-index: 2;
 }
