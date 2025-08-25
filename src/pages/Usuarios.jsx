@@ -38,6 +38,7 @@ export default function Usuarios() {
     );
   }, [q, filas]);
 
+  
   const abrirCrearUsuario = () => {
     setModoModal("crear");
     setUsuarioSeleccionado({

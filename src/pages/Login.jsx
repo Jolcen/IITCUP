@@ -44,6 +44,7 @@ export const Login = ({ setIsAuthenticated }) => {
       setCargando(false);
       return;
     }
+    
 
     // 2) Verificar que existe perfil en app_users (rol/habilitado)
     const { data: perfil, error: perfilError } = await supabase
@@ -126,7 +127,6 @@ export const Login = ({ setIsAuthenticated }) => {
 
           {error && <p style={{ color:'crimson', fontSize:12, marginTop:8 }}>{error}</p>}
 
-          <p className="register-link">¿Aún no estás registrado? <a href="#" onClick={(e)=>e.preventDefault()}>Registrar</a></p>
         </form>
 
       </div>

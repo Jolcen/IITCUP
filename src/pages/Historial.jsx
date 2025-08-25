@@ -1,18 +1,35 @@
+// src/pages/Historial.jsx
 import "../styles/Historial.css";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 const PAGE_SIZE = 10;
+const IA_API = import.meta.env.VITE_IA_URL || "http://localhost:8001";
 
-// iconos/portadas para las pruebas (ajusta paths si usas otros)
+
+
+// Portadas (ajusta paths si usas otros)
 const PRUEBA_IMG = {
-  "PAI": "static/images/pai.jpg",
+  PAI: "static/images/pai.jpg",
   "MCMI-IV": "static/images/mcmi-iv.jpg",
   "MMPI-2": "static/images/mmpi-2.jpg",
-  "CUSTOM": "static/images/testP.jpg",
+  CUSTOM: "static/images/testP.jpg",
 };
 
+
+
+// Códigos requeridos para el procesamiento combinado
+const REQUERIDAS = ["PAI", "MMPI-2", "MCMI-IV"];
+
 export default function Historial() {
+  useEffect(() => {
+  console.log("IA_API =", IA_API);
+  fetch(`${IA_API}/ping`)
+    .then(r => r.json())
+    .then(j => console.log("PING backend:", j))
+    .catch(e => console.error("PING falló:", e));
+}, []);
+
   // KPIs
   const [kpis, setKpis] = useState({ totalCasos: 0, totalPruebasCompletas: 0, loading: true });
 
@@ -22,30 +39,37 @@ export default function Historial() {
   const [page, setPage] = useState(1);
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
 
-  // mapas auxiliares (operadores y estado por caso)
-  const [opMap, setOpMap] = useState({});     // { userId -> nombre/email }
-  const [estadoMap, setEstadoMap] = useState({}); // { casoId -> "pendiente"|"en_proceso"|"terminado" }
+  // mapas auxiliares
+  const [opMap, setOpMap] = useState({});
+  const [estadoMap, setEstadoMap] = useState({});
 
   // modal pruebas
   const [showModal, setShowModal] = useState(false);
-  const [selectedCase, setSelectedCase] = useState(null); // fila de casos
+  const [selectedCase, setSelectedCase] = useState(null);
   const [tests, setTests] = useState([]); // [{id,codigo,nombre,img,done}]
   const [loadingTests, setLoadingTests] = useState(false);
 
-  // sub-modal resultados
+  // intentos por prueba (último COMPLETADO)
+  // attemptsByCode: { "PAI": {pruebaId, intentoId}, ... }
+  const [attemptsByCode, setAttemptsByCode] = useState({});
+
+  // sub-modal resultados por prueba
   const [showReporte, setShowReporte] = useState(false);
-  const [reportePrueba, setReportePrueba] = useState(null); // {id, codigo, nombre}
-  const [reporteData, setReporteData] = useState([]); // [{clave,valor}]
+  const [reportePrueba, setReportePrueba] = useState(null);
+  const [reporteData, setReporteData] = useState([]);
+  const [scoreLoading, setScoreLoading] = useState(false);
+  const [ultimoIntentoId, setUltimoIntentoId] = useState(null);
+
+  // resultado combinado del modelo
+  const [predicting, setPredicting] = useState(false);
+  const [pred, setPred] = useState(null); // { label, probs }
 
   // ---------- KPIs ----------
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        // 1) total de evaluaciones (casos)
         const r1 = await supabase.from("casos").select("id", { count: "exact", head: true });
-
-        // 2) total de pruebas completadas (intentos cerrados)
         const r2 = await supabase
           .from("intentos_prueba")
           .select("id", { count: "exact", head: true })
@@ -72,20 +96,17 @@ export default function Historial() {
       const from = (page - 1) * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
 
-      // 1) casos de la página
-      const q = supabase
+      const { data, error, count } = await supabase
         .from("casos")
         .select("id, paciente_nombre, paciente_ci, motivacion, creado_en, asignado_a", { count: "exact" })
         .order("creado_en", { ascending: false })
         .range(from, to);
 
-      const { data, error, count } = await q;
       if (error || !alive) return;
 
       setRows(data || []);
       setTotal(count || 0);
 
-      // 2) resolver nombres de responsables (app_users) para los asignado_a de la página
       const userIds = Array.from(new Set((data || []).map(r => r.asignado_a).filter(Boolean)));
       if (userIds.length) {
         const { data: users } = await supabase
@@ -97,11 +118,8 @@ export default function Historial() {
           users.forEach(u => { map[u.id] = u.nombre || u.email; });
           setOpMap(map);
         }
-      } else {
-        setOpMap({});
-      }
+      } else setOpMap({});
 
-      // 3) estado por caso (pendiente / en proceso / terminado) usando intentos en los casos visibles
       if (data && data.length) {
         const casoIds = data.map(r => r.id);
         const { data: intents } = await supabase
@@ -110,26 +128,18 @@ export default function Historial() {
           .in("caso_id", casoIds);
 
         if (alive) {
-          const map = {};
-          (intents || []).reduce((acc, it) => {
-            const key = it.caso_id;
-            const arr = acc[key] || (acc[key] = []);
-            arr.push(it);
-            return acc;
-          }, map);
-
+          const byCaso = {};
+          (intents || []).forEach(it => { (byCaso[it.caso_id] ||= []).push(it); });
           const emap = {};
           data.forEach(r => {
-            const list = map[r.id] || [];
+            const list = byCaso[r.id] || [];
             if (list.length === 0) emap[r.id] = "pendiente";
             else if (list.some(x => x.terminado_en == null)) emap[r.id] = "en_proceso";
             else emap[r.id] = "terminado";
           });
           setEstadoMap(emap);
         }
-      } else {
-        setEstadoMap({});
-      }
+      } else setEstadoMap({});
     })();
 
     return () => { alive = false; };
@@ -139,36 +149,58 @@ export default function Historial() {
   async function abrirModalPruebas(row) {
     setSelectedCase(row);
     setShowModal(true);
+    setPred(null); // limpia resultado combinado
 
     setLoadingTests(true);
     setTests([]);
+    setAttemptsByCode({});
 
     try {
-      // todas las pruebas disponibles
+      // catálogo de pruebas
       const { data: pruebas } = await supabase
         .from("pruebas")
         .select("id, codigo, nombre")
         .order("nombre");
 
-      // intentos del caso (para marcar completadas)
+      // intentos del caso, con estado
       const { data: intents } = await supabase
         .from("intentos_prueba")
-        .select("prueba_id, terminado_en")
-        .eq("caso_id", row.id);
+        .select("id, prueba_id, terminado_en")
+        .eq("caso_id", row.id)
+        .order("terminado_en", { ascending: false, nullsLast: true });
 
-      const terminadas = new Set(
-        (intents || []).filter(i => i.terminado_en != null).map(i => i.prueba_id)
-      );
+      // índice pruebas por id
+      const byId = {};
+      (pruebas || []).forEach(p => { byId[p.id] = p; });
 
-      const list = (pruebas || []).map(p => ({
-        id: p.id,
-        codigo: p.codigo,
-        nombre: p.nombre,
-        img: PRUEBA_IMG[p.codigo] || PRUEBA_IMG.CUSTOM,
-        done: terminadas.has(p.id),
-      }));
+      // último intento COMPLETADO por prueba
+      const lastCompletedByPrueba = {};
+      (intents || []).forEach(it => {
+        if (it.terminado_en == null) return;
+        if (!lastCompletedByPrueba[it.prueba_id]) lastCompletedByPrueba[it.prueba_id] = it;
+      });
+
+      // construir cards
+      const list = (pruebas || []).map(p => {
+        const intento = lastCompletedByPrueba[p.id];
+        return {
+          id: p.id,
+          codigo: p.codigo,
+          nombre: p.nombre,
+          img: PRUEBA_IMG[p.codigo] || PRUEBA_IMG.CUSTOM,
+          done: !!intento,
+          intentoId: intento?.id || null,
+        };
+      });
+
+      // map por código requerido -> intentoId
+      const attempts = {};
+      list.forEach(t => {
+        if (t.done) attempts[t.codigo] = { pruebaId: t.id, intentoId: t.intentoId };
+      });
 
       setTests(list);
+      setAttemptsByCode(attempts);
     } finally {
       setLoadingTests(false);
     }
@@ -178,31 +210,104 @@ export default function Historial() {
     setShowModal(false);
     setSelectedCase(null);
     setTests([]);
+    setAttemptsByCode({});
     setShowReporte(false);
     setReportePrueba(null);
     setReporteData([]);
+    setUltimoIntentoId(null);
+    setPred(null);
   }
 
-  // ---------- Sub-modal: resultados de una prueba ----------
+  // ---------- Procesar las 3 pruebas (PAI + MMPI-2 + MCMI-IV) ----------
+  const listoParaProcesar = REQUERIDAS.every(code => attemptsByCode[code]?.intentoId);
+
+  async function procesarTresPruebas() {
+    if (!selectedCase) return;
+    if (!listoParaProcesar) return;
+
+    setPredicting(true);
+    setPred(null);
+
+    try {
+      // 1) Ejecutar scoring por cada intento (3 llamadas)
+      for (const code of REQUERIDAS) {
+        const intentoId = attemptsByCode[code].intentoId;
+        await fetch(`${IA_API}/score`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ intento_id: intentoId }),
+        });
+      }
+
+      // 2) Ejecutar predicción combinada por caso (el backend arma el vector desde 'puntajes')
+      //    Si todavía no tienes este endpoint, puedes comentarlo; las escalas ya quedarán guardadas.
+      const res = await fetch(`${IA_API}/predict-case`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caso_id: selectedCase.id }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        // Esperado: { label: "Bajo|Medio|Alto", probs: {Bajo:0.2,Medio:0.5,Alto:0.3} }
+        setPred(json);
+      } else {
+        // Si el endpoint aún no existe, solo mostramos un aviso
+        setPred({ label: "—", probs: null, note: "Escalas calculadas. Falta /predict-case en backend." });
+      }
+    } catch (e) {
+      console.error(e);
+      setPred({ label: "Error", probs: null });
+    } finally {
+      setPredicting(false);
+    }
+  }
+
+  // ---------- Sub-modal: resultados por prueba (lee puntajes del intento) ----------
   async function abrirResultados(prueba) {
     if (!prueba?.done || !selectedCase) return;
+
     setReportePrueba(prueba);
     setShowReporte(true);
+    setReporteData([]);
+    setUltimoIntentoId(prueba.intentoId || null);
 
-    // intenta traer puntajes si los tienes
-    const { data } = await supabase
+    if (!prueba.intentoId) return;
+
+    // asegurar escalas actualizadas (no bloquea si el backend tarda)
+    try {
+      setScoreLoading(true);
+      await fetch(`${IA_API}/score`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intento_id: prueba.intentoId }),
+      });
+    } catch (e) {
+      console.warn("score falló (se sigue con lectura de puntajes):", e);
+    } finally {
+      setScoreLoading(false);
+    }
+
+    // leer puntajes por intento
+    const { data: pRows, error } = await supabase
       .from("puntajes")
-      .select("clave, valor")
-      .eq("caso_id", selectedCase.id)
-      .eq("prueba_id", prueba.id)
-      .order("clave");
+      .select("escala, puntaje_conv")
+      .eq("intento_id", prueba.intentoId)
+      .order("escala");
 
-    setReporteData(data || []);
+    if (error) {
+      console.error(error);
+      setReporteData([{ clave: "Error", valor: "No se pudieron cargar puntajes" }]);
+      return;
+    }
+
+    setReporteData((pRows || []).map(r => ({ clave: r.escala, valor: r.puntaje_conv })));
   }
+
   function cerrarResultados() {
     setShowReporte(false);
     setReportePrueba(null);
     setReporteData([]);
+    setUltimoIntentoId(null);
   }
 
   // ---------- Render ----------
@@ -266,15 +371,11 @@ export default function Historial() {
                 </td>
 
                 <td title={r.motivacion || ""}>{r.motivacion || "—"}</td>
-
                 <td>{r.creado_en ? new Date(r.creado_en).toLocaleDateString() : "—"}</td>
-
                 <td>{r.asignado_a ? (opMap[r.asignado_a] || r.asignado_a) : "—"}</td>
 
                 <td>
-                  <span className={`estado-tag ${
-                    (estadoMap[r.id] || "pendiente").replace("_", "-")
-                  }`}>
+                  <span className={`estado-tag ${(estadoMap[r.id] || "pendiente").replace("_", "-")}`}>
                     {estadoMap[r.id] === "en_proceso" && "En proceso"}
                     {estadoMap[r.id] === "terminado" && "Terminado"}
                     {(!estadoMap[r.id] || estadoMap[r.id] === "pendiente") && "Pendiente"}
@@ -289,7 +390,7 @@ export default function Historial() {
           </tbody>
         </table>
 
-        {/* Paginación sin excedentes */}
+        {/* Paginación */}
         <div className="pagination">
           <button className="pg" onClick={() => setPage(1)} disabled={page === 1}>«</button>
           <button className="pg" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>‹</button>
@@ -331,19 +432,51 @@ export default function Historial() {
                   {t.done && <span className="badge-done">✓ Completada</span>}
                 </div>
               ))}
-              {(!loadingTests && tests.length === 0) && <div className="muted" style={{padding:12}}>No hay pruebas configuradas.</div>}
+              {!loadingTests && tests.length === 0 && (
+                <div className="muted" style={{padding:12}}>No hay pruebas configuradas.</div>
+              )}
             </div>
 
-            {/* SUB-MODAL: RESULTADOS (placeholder) */}
+            {/* BOTÓN: PROCESAR 3 PRUEBAS */}
+            <div className="process-actions">
+              <button
+                className="btn-primary"
+                disabled={!listoParaProcesar || predicting}
+                onClick={procesarTresPruebas}
+                title={listoParaProcesar ? "Calcular escalas y ejecutar IA" : "Requiere PAI + MMPI-2 + MCMI-IV completadas"}
+              >
+                {predicting ? "Procesando…" : "Procesar (PAI + MMPI-2 + MCMI-IV)"}
+              </button>
+              {!listoParaProcesar && (
+                <div className="muted tiny">Requiere tener las 3 pruebas completadas.</div>
+              )}
+              {pred && (
+                <div className="pred-chip">
+                  <strong>Resultado IA:</strong>{" "}
+                  {pred.label || "—"}
+                  {pred.probs && (
+                    <span className="muted">
+                      {"  "}· Prob.:{" "}
+                      {Object.entries(pred.probs).map(([k,v]) => `${k}: ${Number(v).toFixed(2)}`).join("  ")}
+                    </span>
+                  )}
+                  {pred.note && <div className="muted tiny">{pred.note}</div>}
+                </div>
+              )}
+            </div>
+
+            {/* SUB-MODAL: RESULTADOS POR PRUEBA */}
             {showReporte && (
               <div className="modal-overlay nested" onMouseDown={(e) => { if (e.target.classList.contains("modal-overlay")) cerrarResultados(); }}>
                 <div className="modal result-modal" onMouseDown={(e) => e.stopPropagation()}>
                   <div className="modal-head">
-                    <h3>Resultados · {reportePrueba?.codigo}</h3>
+                    <h3>Resultados · {reportePrueba?.codigo} {ultimoIntentoId ? `· intento ${ultimoIntentoId.slice(0,8)}…` : ""}</h3>
                     <button className="close" onClick={cerrarResultados}>✕</button>
                   </div>
 
                   <div className="result-body">
+                    {scoreLoading && <div className="muted">Calculando…</div>}
+
                     {reporteData.length > 0 ? (
                       <table className="table-mini">
                         <thead><tr><th>Escala</th><th>Valor</th></tr></thead>
@@ -353,20 +486,45 @@ export default function Historial() {
                           ))}
                         </tbody>
                       </table>
-                    ) : (
-                      <div className="muted">
-                        Aún no hay resultados calculados para esta prueba. (Aquí irá tu reporte con gráficos / PDF, según el Figma.)
-                      </div>
-                    )}
+                    ) : !scoreLoading ? (
+                      <div className="muted">Aún no hay resultados calculados para esta prueba.</div>
+                    ) : null}
                   </div>
 
                   <div className="result-actions">
+                    <button
+                      className="btn-soft"
+                      disabled={!ultimoIntentoId || scoreLoading}
+                      onClick={async () => {
+                        if (!ultimoIntentoId) return;
+                        setScoreLoading(true);
+                        try {
+                          await fetch(`${IA_API}/score`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ intento_id: ultimoIntentoId }),
+                          });
+                          const { data: pRows } = await supabase
+                            .from("puntajes")
+                            .select("escala, puntaje_conv")
+                            .eq("intento_id", ultimoIntentoId)
+                            .order("escala");
+                          setReporteData((pRows || []).map(r => ({ clave: r.escala, valor: r.puntaje_conv })));
+                        } finally {
+                          setScoreLoading(false);
+                        }
+                      }}
+                    >
+                      {scoreLoading ? "Calculando…" : "Recalcular puntajes"}
+                    </button>
+
                     <button className="btn-soft" onClick={() => alert("Exportar Excel (pendiente)")}>📁 Exportar Excel</button>
                     <button className="btn-soft" onClick={() => alert("Exportar PDF (pendiente)")}>📄 Exportar PDF</button>
                   </div>
                 </div>
               </div>
             )}
+
           </div>
         </div>
       )}
