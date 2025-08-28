@@ -78,15 +78,17 @@ tbody tr:hover{ background:#fafbff; }
 .identificacion .icon{ font-size:18px; }
 .id-text{ font-size:12px; color:var(--muted); margin-top:4px; }
 
-/* Estado (pendiente / en_proceso / terminado) */
+/* Estado (pendiente / en_evaluacion / evaluado) */
 .estado-tag{
   padding:6px 12px; border-radius:999px;
   font-size:12px; font-weight:700;
   letter-spacing:.3px;
+  display:inline-flex; align-items:center; gap:6px;
 }
 .estado-tag.pendiente{ background:var(--pending-bg); color:var(--pending-fg); }
-.estado-tag.en-proceso{ background:var(--process-bg); color:var(--process-fg); }
-.estado-tag.terminado{ background:var(--done-bg); color:var(--done-fg); }
+/* ⬇️ renombrados para que coincidan con las clases reales */
+.estado-tag.en-evaluacion{ background:var(--process-bg); color:var(--process-fg); }
+.estado-tag.evaluado{ background:var(--done-bg); color:var(--done-fg); }
 
 /* ========= PAGINATION ========= */
 .pagination{
@@ -154,7 +156,7 @@ tbody tr:hover{ background:#fafbff; }
 .test-card:hover{ transform: translateY(-2px); box-shadow: var(--shadow); }
 .test-card.done{ cursor:pointer; border-color: var(--success); background: var(--success-100); }
 
-/* “Completada” (usado por TestViewer/Historial.jsx) */
+/* “Completada” */
 .badge-done{
   position:absolute; top:10px; left:10px;
   background: var(--success); color:#fff;
@@ -202,4 +204,32 @@ tbody tr:hover{ background:#fafbff; }
 @media (max-width: 560px){
   .tests-row{ grid-template-columns: 1fr; }
   .modal{ padding:14px 14px 18px; }
+}
+
+/* ========= SEARCH & FILTER ========= */
+.searchbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.searchbox input {
+  border: none;
+  outline: none;
+  font-size: 14px;
+  width: 220px;
+}
+.filtro {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.actions-right {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }

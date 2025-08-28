@@ -72,10 +72,24 @@ export default function Evaluaciones() {
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
+    // 🔹 Traemos todas las columnas que el modal usa
     let query = supabase
       .from("casos")
       .select(
-        "id, paciente_nombre, paciente_ci, creado_en, estado, motivacion, asignado_a",
+        `
+        id,
+        paciente_nombre,
+        paciente_ci,
+        fecha_nacimiento,
+        genero,
+        nivel_educativo,
+        ocupacion,
+        antecedentes,
+        motivacion,
+        asignado_a,
+        creado_en,
+        estado
+        `,
         { count: "exact" }
       )
       .order("creado_en", { ascending: false })
@@ -132,11 +146,32 @@ export default function Evaluaciones() {
   const openCreate = () =>
     setModal({ open: true, mode: "create", initialCase: null });
 
-  const openEdit = (r) =>
-    setModal({ open: true, mode: "edit", initialCase: r });
+  // 🔹 En Ver y Editar pedimos el registro completo (con fallback)
+  const openView = async (r) => {
+    try {
+      const { data, error } = await supabase
+        .from("casos")
+        .select("*")
+        .eq("id", r.id)
+        .maybeSingle();
+      setModal({ open: true, mode: "view", initialCase: error ? r : (data || r) });
+    } catch {
+      setModal({ open: true, mode: "view", initialCase: r });
+    }
+  };
 
-  const openView = (r) =>
-    setModal({ open: true, mode: "view", initialCase: r });
+  const openEdit = async (r) => {
+    try {
+      const { data, error } = await supabase
+        .from("casos")
+        .select("*")
+        .eq("id", r.id)
+        .maybeSingle();
+      setModal({ open: true, mode: "edit", initialCase: error ? r : (data || r) });
+    } catch {
+      setModal({ open: true, mode: "edit", initialCase: r });
+    }
+  };
 
   const closeModal = () => setModal({ open: false, mode: "create", initialCase: null });
 
@@ -147,9 +182,8 @@ export default function Evaluaciones() {
     const params = new URLSearchParams({
       case: r.id,
       nombre: r.paciente_nombre ?? "",
-      suggested: r.prueba ? toSlug(r.prueba) : "" // opcional: preselección
+      suggested: r.prueba ? toSlug(r.prueba) : ""
     });
-    // Abre la pantalla de selección, NO el visor directo
     navigate(`/tests?${params.toString()}`);
   };
 

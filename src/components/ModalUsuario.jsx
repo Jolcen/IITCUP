@@ -1,15 +1,8 @@
+// src/components/ModalUsuario.jsx
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { supabase } from "../lib/supabaseClient";
 import "../styles/ModalUsuario.css";
 
-/**
- * Modal para crear/ver usuarios.
- * Props:
- *  - modo: "crear" | "ver" (default "crear")
- *  - usuario: datos cuando es "ver"
- *  - onClose: fn
- *  - onCreated: fn (se llama al crear para refrescar listado)
- */
 export default function ModalUsuario({
   modo = "crear",
   usuario = {},
@@ -23,12 +16,10 @@ export default function ModalUsuario({
     : "Detalles del usuario en solo lectura";
 
   const [form, setForm] = useState({
-    // Acceso
     nombre: usuario?.nombre ?? "",
     email: usuario?.email ?? "",
     password: "",
     rol: usuario?.rol ?? "operador", // administrador | operador | asistente
-    // Perfil
     ci: usuario?.ci ?? "",
     telefono: usuario?.telefono ?? "",
     direccion: usuario?.direccion ?? "",
@@ -43,7 +34,6 @@ export default function ModalUsuario({
   });
 
   useEffect(() => {
-    // Si cambian props, sincroniza encabezado y campos base
     setForm((prev) => ({
       ...prev,
       nombre: usuario?.nombre ?? "",
@@ -57,29 +47,64 @@ export default function ModalUsuario({
   const [okMsg, setOkMsg] = useState("");
   const [showPwd, setShowPwd] = useState(false);
 
+  const [touched, setTouched] = useState({});
+
   const onChange = (e) => {
     const { name, value } = e.target;
     setForm((p) => ({ ...p, [name]: value }));
   };
+  const onBlur = (e) => {
+    const { name } = e.target;
+    setTouched((t) => ({ ...t, [name]: true }));
+  };
 
-  const puedeCrear = useMemo(() => {
-    if (!isCrear) return false;
-    const nombre = form.nombre?.trim();
+  // ── Validaciones y mensajes por campo ────────────────────────────────────────
+  const errs = useMemo(() => {
+    const e = {};
     const email = form.email?.trim();
-    const passOk = form.password && form.password.length >= 8;
-    const emailOk = /^\S+@\S+\.\S+$/.test(email || "");
-    const rolOk = ["administrador", "operador", "asistente"].includes(form.rol);
-    return Boolean(nombre && emailOk && passOk && rolOk);
+    const nombre = form.nombre?.trim();
+
+    if (!nombre) e.nombre = "El nombre es obligatorio.";
+    if (!email) e.email = "El email es obligatorio.";
+    else if (!/^\S+@\S+\.\S+$/.test(email)) e.email = "El email no es válido.";
+
+    if (isCrear) {
+      if (!form.password) e.password = "La contraseña es obligatoria.";
+      else if (form.password.length < 8)
+        e.password = "Mínimo 8 caracteres.";
+    }
+
+    if (!["administrador", "operador", "asistente"].includes(form.rol)) {
+      e.rol = "Selecciona un rol válido.";
+    }
+
+    if (form.telefono && !/^\d{7,15}$/.test(form.telefono)) {
+      e.telefono = "Teléfono inválido (solo dígitos, 7–15).";
+    }
+
+    return e;
   }, [form, isCrear]);
 
-  const closeOnEsc = useCallback((ev) => {
-    if (ev.key === "Escape" && !guardando) onClose?.();
-  }, [guardando, onClose]);
+  const puedeCrear = isCrear && Object.keys(errs).length === 0;
 
+  const closeOnEsc = useCallback(
+    (ev) => {
+      if (ev.key === "Escape" && !guardando) onClose?.();
+    },
+    [guardando, onClose]
+  );
   useEffect(() => {
     document.addEventListener("keydown", closeOnEsc);
     return () => document.removeEventListener("keydown", closeOnEsc);
   }, [closeOnEsc]);
+
+  function showFieldErr(name) {
+    return touched[name] && errs[name] ? (
+      <div style={{ color: "#c0392b", fontSize: 12, marginTop: 4 }}>
+        {errs[name]}
+      </div>
+    ) : null;
+  }
 
   async function handleGuardar() {
     try {
@@ -87,8 +112,14 @@ export default function ModalUsuario({
       setError("");
       setOkMsg("");
 
+      // Si hay errores, los mostramos y marcamos los campos
       if (!puedeCrear) {
-        setError("Revisa nombre, email y contraseña (mínimo 8).");
+        setTouched((t) => {
+          const all = { ...t };
+          Object.keys(errs).forEach((k) => (all[k] = true));
+          return all;
+        });
+        setError("Revisa los campos marcados en rojo.");
         return;
       }
 
@@ -97,7 +128,6 @@ export default function ModalUsuario({
         password: form.password,
         nombre: form.nombre.trim(),
         rol: form.rol,
-        // extras opcionales (si los guardas en otra tabla)
         ci: form.ci?.trim() || null,
         telefono: form.telefono?.trim() || null,
         direccion: form.direccion?.trim() || null,
@@ -111,23 +141,20 @@ export default function ModalUsuario({
         estado: form.estado || "Disponible",
       };
 
-      // debe existir sesión (admin) para invocar la function
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         setError("No hay sesión activa. Inicia sesión nuevamente.");
         return;
       }
 
-      // Usa el SDK para invocar la Edge Function (más simple que fetch)
-      const { data, error } = await supabase.functions.invoke("create-staff", {
+      const { error } = await supabase.functions.invoke("create-staff", {
         body: payload,
       });
-
-      if (error) throw new Error(error.message || "No se pudo crear el usuario");
+      if (error) throw new Error(error.message || "No se pudo crear el usuario.");
 
       setOkMsg("✅ Usuario creado correctamente");
-      onCreated?.();  // refresca listado
-      onClose?.();    // cierra modal
+      onCreated?.();
+      onClose?.();
     } catch (e) {
       setError(e.message || "Ocurrió un error");
     } finally {
@@ -147,7 +174,6 @@ export default function ModalUsuario({
         onClick={(e) => e.stopPropagation()}
         aria-labelledby="modal-title"
       >
-        {/* HEADER */}
         <div className="modal-header">
           <h3 id="modal-title">{titulo}</h3>
           <button
@@ -160,7 +186,6 @@ export default function ModalUsuario({
         </div>
         <p className="modal-subtitle">{subtitulo}</p>
 
-        {/* CABECERA CON AVATAR */}
         <div className="usuario-header">
           <img src="/avatar.png" alt="avatar" />
           <div>
@@ -170,7 +195,6 @@ export default function ModalUsuario({
           </div>
         </div>
 
-        {/* FORMULARIO */}
         <div className="form-grid">
           <div className="col">
             <label>Nombre</label>
@@ -178,9 +202,12 @@ export default function ModalUsuario({
               name="nombre"
               value={form.nombre}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
               placeholder="Ej. Ana Pérez"
+              aria-invalid={!!errs.nombre}
             />
+            {showFieldErr("nombre")}
 
             <label>Email</label>
             <input
@@ -188,9 +215,12 @@ export default function ModalUsuario({
               type="email"
               value={form.email}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
               placeholder="usuario@correo.com"
+              aria-invalid={!!errs.email}
             />
+            {showFieldErr("email")}
 
             {isCrear && (
               <>
@@ -201,8 +231,10 @@ export default function ModalUsuario({
                     type={showPwd ? "text" : "password"}
                     value={form.password}
                     onChange={onChange}
+                    onBlur={onBlur}
                     placeholder="Mínimo 8 caracteres"
                     disabled={guardando}
+                    aria-invalid={!!errs.password}
                   />
                   <button
                     type="button"
@@ -213,6 +245,7 @@ export default function ModalUsuario({
                     {showPwd ? "Ocultar" : "Ver"}
                   </button>
                 </div>
+                {showFieldErr("password")}
               </>
             )}
 
@@ -221,18 +254,22 @@ export default function ModalUsuario({
               name="rol"
               value={form.rol}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
+              aria-invalid={!!errs.rol}
             >
               <option value="administrador">Administrador</option>
               <option value="operador">Operador</option>
               <option value="asistente">Asistente</option>
             </select>
+            {showFieldErr("rol")}
 
             <label>CI</label>
             <input
               name="ci"
               value={form.ci}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
               placeholder="Documento"
             />
@@ -242,15 +279,19 @@ export default function ModalUsuario({
               name="telefono"
               value={form.telefono}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
               placeholder="Ej. 71234567"
+              aria-invalid={!!errs.telefono}
             />
+            {showFieldErr("telefono")}
 
             <label>Dirección domicilio</label>
             <input
               name="direccion"
               value={form.direccion}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
               placeholder="Calle, Zona, Ciudad"
             />
@@ -261,6 +302,7 @@ export default function ModalUsuario({
               type="date"
               value={form.fecha_nacimiento}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
             />
           </div>
@@ -271,6 +313,7 @@ export default function ModalUsuario({
               name="especialidad"
               value={form.especialidad}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
             >
               <option value="">Seleccione</option>
@@ -285,6 +328,7 @@ export default function ModalUsuario({
               name="matricula"
               value={form.matricula}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
             />
 
@@ -293,6 +337,7 @@ export default function ModalUsuario({
               name="institucion"
               value={form.institucion}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
             />
 
@@ -302,6 +347,7 @@ export default function ModalUsuario({
               type="date"
               value={form.fecha_graduacion}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
             />
 
@@ -310,6 +356,7 @@ export default function ModalUsuario({
               name="nivel"
               value={form.nivel}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
               placeholder="Jr / Sr / etc."
             />
@@ -319,6 +366,7 @@ export default function ModalUsuario({
               name="turno"
               value={form.turno}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
               placeholder="Mañana / Tarde / Noche"
             />
@@ -328,6 +376,7 @@ export default function ModalUsuario({
               name="estado"
               value={form.estado}
               onChange={onChange}
+              onBlur={onBlur}
               disabled={!isCrear || guardando}
             >
               <option>Disponible</option>
@@ -337,7 +386,7 @@ export default function ModalUsuario({
           </div>
         </div>
 
-        {/* MENSAJES */}
+        {/* BANNERS */}
         {error && <div className="alert alert--error">{error}</div>}
         {okMsg && <div className="alert alert--ok">{okMsg}</div>}
 
