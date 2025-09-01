@@ -1,4 +1,3 @@
-// src/pages/TestViewer.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
@@ -23,14 +22,16 @@ export default function TestViewer() {
 
   const [attemptId, setAttemptId] = useState(null);
   const [pruebaId, setPruebaId] = useState(null);
+
   const tickingRef = useRef(null);
+  const savingRef = useRef(false);     // ← candado anti doble-click
+  const finishedRef = useRef(false);   // evita finish doble
 
   const storageKey = useMemo(
     () => `progress-${testId}-${caseId || "no-case"}`,
     [testId, caseId]
   );
 
-  // helpers
   const code = useMemo(
     () => SLUG2CODE[testId] ?? (testId || "").toUpperCase(),
     [testId]
@@ -40,7 +41,7 @@ export default function TestViewer() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Sin sesión.");
 
-    // 1) ¿hay intento abierto?
+    // 1) intento abierto
     const { data: abiertos, error: e1 } = await supabase
       .from("intentos_prueba")
       .select("id")
@@ -55,7 +56,7 @@ export default function TestViewer() {
     // 2) crear intento
     const { data: creado, error: e2 } = await supabase
       .from("intentos_prueba")
-      .insert({ caso_id: caseId, prueba_id: pid }) // creado_por por default
+      .insert({ caso_id: caseId, prueba_id: pid })
       .select("id")
       .single();
 
@@ -63,7 +64,7 @@ export default function TestViewer() {
     return creado.id;
   }
 
-  // Cargar ítems de la prueba y armar viewer
+  // Cargar ítems y preparar viewer
   useEffect(() => {
     let alive = true;
 
@@ -72,7 +73,7 @@ export default function TestViewer() {
         setLoading(true);
         setErr("");
 
-        // 0) obtener prueba por código (slug -> código -> uuid)
+        // 0) prueba
         const { data: pruebas, error: eP } = await supabase
           .from("pruebas")
           .select("id, codigo")
@@ -86,7 +87,7 @@ export default function TestViewer() {
         if (!alive) return;
         setPruebaId(pid);
 
-        // 0.1) BLOQUEAR si ya está terminada para ESTE caso y ESTA prueba
+        // 0.1) bloquear si ya está terminada para ESTE caso
         if (caseId) {
           const { data: comp, error: eComp } = await supabase
             .from("intentos_prueba")
@@ -99,11 +100,11 @@ export default function TestViewer() {
           if (eComp) throw eComp;
           if (comp && comp.length) {
             if (alive) setErr("Esta prueba ya fue completada para este caso.");
-            return; // detenemos aquí
+            return;
           }
         }
 
-        // 1) traer ítems
+        // 1) ítems
         const { data, error } = await supabase
           .from("items_prueba")
           .select("id, enunciado, tipo, opciones, inverso, orden, activo")
@@ -137,7 +138,7 @@ export default function TestViewer() {
           } catch {}
         }
 
-        // 3) asegurar intento y guardarlo
+        // 3) asegurar intento
         const atid = await ensureAttempt(pid);
         if (!alive) return;
         setAttemptId(atid);
@@ -170,25 +171,30 @@ export default function TestViewer() {
     );
   }, [currentIndex, time, testId, caseId, storageKey]);
 
-  // acciones
+  // Guardar respuesta (idempotente + candado)
   async function handleAnswer(valor) {
-    const q = items[currentIndex];
+    // bloquea si ya está guardando o no hay intento listo
+    if (savingRef.current || !attemptId) return;
+
+    const idxSnapshot = currentIndex;    // evita carreras con setState async
+    const q = items[idxSnapshot];
     if (!q) return;
 
+    savingRef.current = true;
     try {
       const payload = {
         caso_id: caseId,
         prueba_id: pruebaId,
         item_id: q.id,
         valor: String(valor),
-        intento_id: attemptId,
+        intento_id: attemptId,     // ← clave verdadera del intento
         invertido: q.inverso ?? false,
       };
 
       const { error } = await supabase
         .from("respuestas")
         .upsert(payload, {
-          onConflict: "caso_id,prueba_id,item_id",
+          onConflict: "intento_id,item_id",  // ← IMPORTANTE
           ignoreDuplicates: false,
         });
 
@@ -196,11 +202,15 @@ export default function TestViewer() {
     } catch (e) {
       console.error("Excepción guardando respuesta:", e);
     } finally {
-      setCurrentIndex((i) => i + 1);
+      // avanza SOLO si seguimos en el mismo índice
+      setCurrentIndex((i) => (i === idxSnapshot ? i + 1 : i));
+      savingRef.current = false;
     }
   }
 
   async function finishAttempt() {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
     try {
       if (attemptId) {
         await supabase
@@ -222,7 +232,6 @@ export default function TestViewer() {
 
   const total = items.length;
   if (currentIndex >= total) {
-    // fin
     finishAttempt();
     return (
       <div className="finish-wrap">
@@ -242,6 +251,8 @@ export default function TestViewer() {
   const pregunta = items[currentIndex];
   const opciones = pregunta.opciones?.length ? pregunta.opciones : ["Nada", "Poco", "Algo", "Mucho"];
   const progreso = Math.round((currentIndex / Math.max(1, total)) * 100);
+
+  const botonesDeshabilitados = savingRef.current || !attemptId;
 
   return (
     <div className="test-topbar-container">
@@ -266,7 +277,13 @@ export default function TestViewer() {
 
         <div className="test-options">
           {opciones.map((op, idx) => (
-            <button key={idx} className="btn-opcion" onClick={() => handleAnswer(op)}>
+            <button
+              key={idx}
+              className="btn-opcion"
+              onClick={() => handleAnswer(op)}
+              disabled={botonesDeshabilitados}
+              title={!attemptId ? "Preparando intento..." : "Seleccionar"}
+            >
               {op}
             </button>
           ))}

@@ -1,11 +1,20 @@
+// src/components/ModalResultados.jsx
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
-import "../styles/ModalResultados.css"; // <-- estilos separados
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
+import "../styles/ModalResultados.css";
 
-// Requeridas para habilitar “Generar perfil”
+import { jsPDF } from "jspdf";
+// autoTable lo dejamos por si luego quieres anexar tablas
+import autoTable from "jspdf-autotable";
+
+
+// Plantilla Excel empaquetada por Vite
+import PAI_TEMPLATE_URL from "../assets/templates/Hoja-de-calculo-para-PAI-vacio.xlsx?url";
+
 const REQUERIDAS = ["PAI", "MMPI-2", "MCMI-IV"];
 
-// Portadas
 const PRUEBA_IMG = {
   PAI: "static/images/pai.jpg",
   "MCMI-IV": "static/images/mcmi-iv.jpg",
@@ -13,22 +22,86 @@ const PRUEBA_IMG = {
   DEFAULT: "static/images/testP.jpg",
 };
 
+  // Orden oficial (ajústalo si lo deseas)
+const PAI_VALIDES = ["INC","INF","IMN","IMP"];
+const PAI_CLINICAS = ["SOM","ANS","TRA","DEP","MAN","PAR","ESQ","LIM","ANT","ALC","DRG"];
+const PAI_TRAT = ["AGR","SUI","EST","FAS","RTR"];
+const PAI_INTERP = ["DOM","AFA"];
+
+// Rango y bandas (aprox. a tu plantilla)
+const T_MIN = 20;
+const T_MAX = 110;
+
+// Colores
+const C_GREY = [120,120,120];
+const C_TEXT = [20,20,20];
+const C_GREEN = [198, 228, 214]; // verde claro (40-59)
+const C_GREYBAND = [230, 230, 230]; // 60-69
+const C_ORANGE = [247, 227, 200]; // 70-110
+const C_LINE = [30, 60, 90];      // polilínea
+const C_DOT = [30, 60, 90];
+
+// Convierte T a coordenada X
+const tToX = (t, x0, width) => {
+  if (t == null || isNaN(t)) return null;
+  const tt = Math.max(T_MIN, Math.min(T_MAX, Number(t)));
+  return x0 + ((tt - T_MIN) * width) / (T_MAX - T_MIN);
+};
+
+// Dibuja la regla horizontal con marcas
+function drawAxis(doc, x0, y, w) {
+  doc.setDrawColor(...C_GREY);
+  doc.setLineWidth(0.6);
+  doc.line(x0, y, x0 + w, y);
+
+  const ticks = [20,40,50,60,70,80,90,100,110];
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(9);
+  doc.setTextColor(...C_GREY);
+  ticks.forEach(t => {
+    const xx = tToX(t, x0, w);
+    doc.line(xx, y-3, xx, y+3);
+    doc.text(String(t), xx-6, y+14);
+  });
+  doc.setTextColor(...C_TEXT);
+}
+
+// Dibuja bandas de fondo: 40-59 (verde), 60-69 (gris), 70-110 (naranja)
+function drawBands(doc, x0, yTop, h, w) {
+  // verde 40-59
+  let xA = tToX(40, x0, w);
+  let xB = tToX(59, x0, w);
+  doc.setFillColor(...C_GREEN);
+  doc.rect(xA, yTop, xB-xA, h, "F");
+
+  // gris 60-69
+  xA = tToX(60, x0, w);
+  xB = tToX(69, x0, w);
+  doc.setFillColor(...C_GREYBAND);
+  doc.rect(xA, yTop, xB-xA, h, "F");
+
+  // naranja 70-110
+  xA = tToX(70, x0, w);
+  xB = tToX(110, x0, w);
+  doc.setFillColor(...C_ORANGE);
+  doc.rect(xA, yTop, xB-xA, h, "F");
+}
+
+
 export default function ModalResultados({ open, onClose, caso }) {
   const [loading, setLoading] = useState(false);
-  const [tests, setTests] = useState([]);      // {id,codigo,nombre,img,done,intentoId}
+  const [tests, setTests] = useState([]);
   const [attemptsByCode, setAttemptsByCode] = useState({});
   const allReady = useMemo(
     () => REQUERIDAS.every((c) => attemptsByCode[c]?.intentoId),
     [attemptsByCode]
   );
 
-  // Sub-modal: resultados por prueba
   const [showDetalle, setShowDetalle] = useState(false);
   const [detalleTest, setDetalleTest] = useState(null);
   const [puntajes, setPuntajes] = useState([]);
   const [puntajesLoading, setPuntajesLoading] = useState(false);
 
-  // Sub-modal: informe final (placeholder)
   const [showPerfil, setShowPerfil] = useState(false);
 
   useEffect(() => {
@@ -38,14 +111,12 @@ export default function ModalResultados({ open, onClose, caso }) {
       setTests([]);
       setAttemptsByCode({});
       try {
-        // SOLO requeridas
         const { data: pruebas } = await supabase
           .from("pruebas")
           .select("id,codigo,nombre")
           .in("codigo", REQUERIDAS)
           .order("nombre");
 
-        // Intentos del caso
         const { data: intents } = await supabase
           .from("intentos_prueba")
           .select("id,prueba_id,terminado_en")
@@ -83,9 +154,8 @@ export default function ModalResultados({ open, onClose, caso }) {
     })();
   }, [open, caso?.id]);
 
-  // Abrir detalle de una prueba (solo si está completa)
   const abrirDetalle = async (t) => {
-    if (!t?.done || !t?.intentoId) return; // inhabilitada si no está completa
+    if (!t?.done || !t?.intentoId) return;
     setDetalleTest(t);
     setShowDetalle(true);
     setPuntajes([]);
@@ -108,6 +178,114 @@ export default function ModalResultados({ open, onClose, caso }) {
     setPuntajes([]);
   };
 
+  // --------- Helpers exportación ----------
+  const toIndex = (raw) => {
+    if (raw == null) return null;
+    const s = String(raw).trim().toLowerCase();
+    if (/^[0-3]$/.test(s)) return Number(s);
+    if (/^[1-4]$/.test(s)) return Number(s) - 1;
+    if (/^[a-d]$/.test(s)) return s.charCodeAt(0) - 97;
+    const m = { nada: 0, poco: 1, algo: 2, mucho: 3, af: 0, lc: 1, pc: 2, mc: 3 };
+    if (m.hasOwnProperty(s)) return m[s];
+    if (/absolut(a|amente)\s*falso/.test(s)) return 0;
+    if (/liger(amente)?/.test(s)) return 1;
+    if (/principal(mente)?/.test(s)) return 2;
+    if (/muy\s*cierto/.test(s)) return 3;
+    return null;
+  };
+
+  async function exportarExcelPAI(t, caso) {
+    try {
+      if (!t?.intentoId) {
+        alert("No hay intento para exportar.");
+        return;
+      }
+
+      // 1) Traer TODAS las respuestas del intento con el orden del ítem
+      const { data: rows, error } = await supabase
+        .from("respuestas")
+        .select(`
+          item_id,
+          valor,
+          items_prueba!inner(orden)
+        `)
+        .eq("intento_id", t.intentoId)
+        .order("orden", { ascending: true, foreignTable: "items_prueba" });
+
+      if (error) throw error;
+
+      // 2) Plantilla
+      const resp = await fetch(PAI_TEMPLATE_URL);
+      if (!resp.ok) throw new Error("No pude cargar la plantilla del Excel.");
+      const ab = await resp.arrayBuffer();
+      const wb = XLSX.read(ab);
+      const ws =
+        wb.Sheets["Hoja de Captura"] ||
+        wb.Sheets["Hoja de captura"] ||
+        wb.Sheets[wb.SheetNames[0]];
+      if (!ws) throw new Error("La plantilla no tiene la hoja 'Hoja de Captura'.");
+
+      // 3) Cabecera (opcional)
+      if (caso) {
+        ws["A1"] = { t: "s", v: caso.paciente_nombre || "" };
+        ws["A2"] = { t: "s", v: caso.paciente_ci || "" };
+      }
+
+      // 4) Construir índice: número de ítem (col A) → fila exacta
+      const idxByItem = new Map(); // itemNo:number -> row:number
+      const MAX_SCAN = 2000;       // rango generoso
+      for (let r = 1; r <= MAX_SCAN; r++) {
+        const cell = ws["A" + r];
+        if (!cell || cell.v == null) continue;
+        let v = cell.v;
+        if (typeof v === "string") v = v.trim();
+        const n = parseInt(v, 10);
+        if (!Number.isNaN(n)) {
+          // guarda solo si es un número de ítem plausible
+          if (n >= 1 && n <= 1000 && !idxByItem.has(n)) {
+            idxByItem.set(n, r);
+          }
+        }
+      }
+
+      // 5) Escribir "x" por cada respuesta, usando la fila encontrada
+      const COLS = ["C", "D", "E", "F"];
+      let maxRowTouched = 1;
+
+      rows.forEach((r, i) => {
+        const ord = Number(r?.items_prueba?.orden) || (i + 1);
+        const row = idxByItem.get(ord); // ← fila real en la plantilla
+        if (!row) return;               // si no está, no marcamos (plantilla incompleta)
+
+        // limpia C..F de esa fila antes de marcar
+        COLS.forEach((col) => delete ws[`${col}${row}`]);
+
+        const index = toIndex(r.valor);
+        if (index != null && index >= 0 && index <= 3) {
+          ws[`${COLS[index]}${row}`] = { t: "s", v: "x", w: "x" };
+          if (row > maxRowTouched) maxRowTouched = row;
+        }
+      });
+
+      // 6) Ajustar rango visible de la hoja
+      const ref = ws["!ref"] || "A1:H1";
+      const m = ref.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/i);
+      ws["!ref"] = m ? `${m[1]}${m[2]}:${m[3]}${Math.max(maxRowTouched, Number(m[4]) || 1)}`
+                     : `A1:H${Math.max(maxRowTouched, 1)}`;
+
+      // 7) Descargar archivo
+      const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+      const blob = new Blob([out], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const nombre = `PAI_${caso?.paciente_ci || ""}_${t.intentoId.slice(0, 6)}.xlsx`;
+      saveAs(blob, nombre);
+    } catch (e) {
+      console.error(e);
+      alert(e.message || "No pude exportar el Excel.");
+    }
+  }
+
   return open ? (
     <div
       className="modal-overlay"
@@ -115,16 +293,12 @@ export default function ModalResultados({ open, onClose, caso }) {
         if (e.target.classList.contains("modal-overlay")) onClose?.();
       }}
     >
-      <div
-        className="modal pruebas-modal mr-modal"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
+      <div className="modal pruebas-modal mr-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head mr-header">
           <h3>Pruebas psicológicas</h3>
           <button className="close" onClick={onClose}>✕</button>
         </div>
 
-        {/* Info del paciente */}
         {caso && (
           <p className="muted mr-paciente">
             Paciente: <span className="mr-bold">{caso.paciente_nombre}</span> · CI{" "}
@@ -132,7 +306,6 @@ export default function ModalResultados({ open, onClose, caso }) {
           </p>
         )}
 
-        {/* Grid de pruebas */}
         {loading && <div className="muted" style={{ padding: 12 }}>Cargando…</div>}
 
         {!loading && (
@@ -144,26 +317,20 @@ export default function ModalResultados({ open, onClose, caso }) {
                 onClick={() => abrirDetalle(t)}
                 title={t.done ? "Ver resultados" : "Aún no completada"}
               >
-                {/* Etiqueta arriba izquierda */}
                 {t.done ? (
                   <span className="mr-badge mr-badge--done">✔ Completada</span>
                 ) : (
                   <span className="mr-badge mr-badge--pending">Pendiente</span>
                 )}
-
-                {/* Imagen */}
                 <div className="mr-card__imgwrap">
                   <img src={t.img} alt={t.codigo} className="mr-card__img" />
                 </div>
-
-                {/* Título */}
                 <div className="mr-card__title">{t.nombre}</div>
               </div>
             ))}
           </div>
         )}
 
-        {/* Acciones */}
         <div className="mr-actions">
           <button
             className={allReady ? "btn-primary mr-btn" : "btn-soft mr-btn mr-btn--disabled"}
@@ -175,7 +342,6 @@ export default function ModalResultados({ open, onClose, caso }) {
           </button>
         </div>
 
-        {/* SUB-MODAL: Detalle de prueba */}
         {showDetalle && (
           <div
             className="modal-overlay nested"
@@ -202,17 +368,11 @@ export default function ModalResultados({ open, onClose, caso }) {
                 {!puntajesLoading && puntajes.length > 0 && (
                   <table className="table-mini" style={{ width: "100%" }}>
                     <thead>
-                      <tr>
-                        <th>Escala</th>
-                        <th>Valor</th>
-                      </tr>
+                      <tr><th>Escala</th><th>Valor</th></tr>
                     </thead>
                     <tbody>
                       {puntajes.slice(0, 12).map((r, i) => (
-                        <tr key={i}>
-                          <td>{r.escala}</td>
-                          <td>{String(r.puntaje_conv)}</td>
-                        </tr>
+                        <tr key={i}><td>{r.escala}</td><td>{String(r.puntaje_conv)}</td></tr>
                       ))}
                     </tbody>
                   </table>
@@ -220,10 +380,19 @@ export default function ModalResultados({ open, onClose, caso }) {
               </div>
 
               <div className="result-actions">
-                <button className="btn-soft" onClick={() => alert("Exportar a Excel (pendiente)")}>
+                <button
+                  className="btn-soft"
+                  onClick={() => {
+                    if (detalleTest?.codigo !== "PAI") {
+                      alert("Por ahora el exportador está implementado para PAI.");
+                      return;
+                    }
+                    exportarExcelPAI(detalleTest, caso);
+                  }}
+                >
                   📁 Exportar Excel
                 </button>
-                <button className="btn-soft" onClick={() => alert("Exportar a PDF (pendiente)")}>
+                <button className="btn-soft" onClick={() => alert("Exportar PDF (pendiente)")}>
                   📄 Exportar PDF
                 </button>
               </div>
@@ -231,7 +400,6 @@ export default function ModalResultados({ open, onClose, caso }) {
           </div>
         )}
 
-        {/* SUB-MODAL: Informe final (placeholder) */}
         {showPerfil && (
           <div
             className="modal-overlay nested"
@@ -254,9 +422,9 @@ export default function ModalResultados({ open, onClose, caso }) {
                 <div className="card" style={{ marginTop: 6 }}>
                   <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>Resumen</p>
                   <ul style={{ marginTop: 8, paddingLeft: 18 }}>
-                    <li>PAI: completado ✅</li>
-                    <li>MMPI-2: completado ✅</li>
-                    <li>MCMI-IV: completado ✅</li>
+                    <li>PAI: {attemptsByCode["PAI"] ? "completado ✅" : "pendiente"}</li>
+                    <li>MMPI-2: {attemptsByCode["MMPI-2"] ? "completado ✅" : "pendiente"}</li>
+                    <li>MCMI-IV: {attemptsByCode["MCMI-IV"] ? "completado ✅" : "pendiente"}</li>
                   </ul>
                   <p className="muted" style={{ marginTop: 8 }}>
                     (Aquí irá el perfil generado por IA con formatos y gráficos — pendiente.)
