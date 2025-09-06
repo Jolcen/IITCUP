@@ -7,6 +7,7 @@ import {
   FaPlay,
   FaSearch,
   FaEye,
+  FaUserPlus,
 } from "react-icons/fa";
 import {
   useEffect,
@@ -18,17 +19,19 @@ import {
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-// Unifica crear/editar/ver
+// Unifica crear/editar/ver evaluación
 import ModalEvaluacion from "../components/ModalEvaluacion";
+// Selector de pacientes (frontend, sin backend por ahora)
+import ModalSelectPaciente from "../components/ModalSelectPaciente";
 
 const PAGE_SIZE = 8;
 
 export default function Evaluaciones() {
   const navigate = useNavigate();
 
-  // --- Perfil actual ---
+  // --- Perfil actual (rol) ---
   const [userId, setUserId] = useState(null);
-  const [role, setRole] = useState(null); // administrador | operador | asistente
+  const [role, setRole] = useState(null); // administrador | operador (encargado) | asistente
 
   useEffect(() => {
     let alive = true;
@@ -50,7 +53,7 @@ export default function Evaluaciones() {
   }, []);
 
   const isAdmin = role === "administrador";
-  const isOperator = role === "operador";
+  const isOperator = role === "operador";   // “Encargado”
   const isAssistant = role === "asistente";
 
   // --- Estado tabla/paginación/filtros ---
@@ -65,6 +68,37 @@ export default function Evaluaciones() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  // --- Pacientes (frontend/mock) ---------------------------------
+  // Aquí tendrás la lista real al conectar backend.
+  const [pacientesMock] = useState([
+    // { id:"p1", nombre:"Juan Pérez", ci:"123456", email:"juan@mail.com" },
+    // { id:"p2", nombre:"María López", ci:"654321", email:"maria@mail.com" },
+  ]);
+
+  // Modal: asignación de paciente a un caso
+  const [selectPaciente, setSelectPaciente] = useState({ open: false, caseId: null });
+  const abrirAsignar = (r) => setSelectPaciente({ open: true, caseId: r.id });
+  const cerrarAsignar = () => setSelectPaciente({ open: false, caseId: null });
+  const asignarPaciente = (pacienteId) => {
+    // FRONTEND ONLY: actualizamos la fila en memoria
+    const pac = pacientesMock.find(p => p.id === pacienteId);
+    setRows(prev =>
+      prev.map(r =>
+        r.id === selectPaciente.caseId
+          ? {
+              ...r,
+              paciente_id: pac?.id,
+              paciente_nombre: pac?.nombre ?? r.paciente_nombre,
+              // si quieres más campos para “ver” luego, almacénalos aquí
+              paciente_ci: pac?.ci,
+              paciente_email: pac?.email,
+            }
+          : r
+      )
+    );
+    cerrarAsignar();
+  };
+
   // --- Carga de casos ---
   const load = useCallback(async () => {
     setLoading(true);
@@ -72,14 +106,15 @@ export default function Evaluaciones() {
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
-    // 🔹 Traemos todas las columnas que el modal usa
+    // 🔹 Traemos columnas base (las que usa la tabla y los modales)
     let query = supabase
       .from("casos")
       .select(
         `
         id,
-        paciente_nombre,
-        paciente_ci,
+        paciente_id,               -- opcional
+        paciente_nombre,           -- opcional (si lo guardas denormalizado)
+        paciente_ci,               -- opcional
         fecha_nacimiento,
         genero,
         nivel_educativo,
@@ -146,7 +181,7 @@ export default function Evaluaciones() {
   const openCreate = () =>
     setModal({ open: true, mode: "create", initialCase: null });
 
-  // 🔹 En Ver y Editar pedimos el registro completo (con fallback)
+  // En Ver y Editar pedimos el registro completo (con fallback)
   const openView = async (r) => {
     try {
       const { data, error } = await supabase
@@ -189,7 +224,7 @@ export default function Evaluaciones() {
 
   const handleEliminar = async (r) => {
     if (!isAdmin) return;
-    if (!confirm(`¿Eliminar la evaluación de ${r.paciente_nombre}?`)) return;
+    if (!confirm(`¿Eliminar la evaluación de ${r.paciente_nombre || "este caso"}?`)) return;
 
     const { error } = await supabase.from("casos").delete().eq("id", r.id);
     if (error) {
@@ -254,6 +289,7 @@ export default function Evaluaciones() {
             <option value="evaluado">Evaluado</option>
           </select>
 
+          {/* Crear evaluación: puede estar sin paciente (agendada) */}
           {isAdmin && (
             <button className="btn-add" onClick={openCreate}>
               + Nueva evaluación
@@ -295,13 +331,29 @@ export default function Evaluaciones() {
                 const canEdit = isAdmin;
                 const canDelete = isAdmin;
                 const canView = isAssistant || canEdit || canDoTest;
+                const canAssignPatient = isAdmin || isOperator; // quiénes pueden asignar paciente
 
                 return (
                   <tr key={r.id}>
                     <td className="col-individuo">
                       <FaUserCircle className="avatar" />
                       <div className="name">
-                        <div className="nombre">{r.paciente_nombre}</div>
+                        <div className="nombre">
+                          {r.paciente_nombre || <span className="muted">— Sin paciente</span>}
+                        </div>
+
+                        {/* Botón Asignar si no hay paciente */}
+                        {!r.paciente_nombre && canAssignPatient && (
+                          <button
+                            className="btn btn-sm btn-light"
+                            title="Asignar paciente"
+                            onClick={() => abrirAsignar(r)}
+                            style={{ marginTop: 6 }}
+                          >
+                            <FaUserPlus />
+                            <span>Asignar</span>
+                          </button>
+                        )}
                       </div>
                     </td>
 
@@ -394,7 +446,7 @@ export default function Evaluaciones() {
             ‹
           </button>
 
-          {pagesToShow.map((n) => (
+        {pagesToShow.map((n) => (
             <button
               key={n}
               className={`pg ${n === page ? "active" : ""}`}
@@ -423,13 +475,22 @@ export default function Evaluaciones() {
         </div>
       </div>
 
-      {/* Modal unificado */}
+      {/* Modal unificado de evaluación */}
       {modal.open && (
         <ModalEvaluacion
           mode={modal.mode}                // "create" | "edit" | "view"
           initialCase={modal.initialCase}  // null para create
           onClose={closeModal}
           onSaved={load}                   // refresca al guardar
+        />
+      )}
+
+      {/* Modal para asignar paciente (frontend/mock) */}
+      {selectPaciente.open && (
+        <ModalSelectPaciente
+          pacientes={pacientesMock}
+          onClose={cerrarAsignar}
+          onSelect={asignarPaciente}
         />
       )}
     </div>

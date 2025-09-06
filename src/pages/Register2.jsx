@@ -22,7 +22,7 @@ const Register2 = () => {
                         </div>
                         <div className="input-group">
                             <label>Mapa</label>
-                            <img src="../../public/static/images/map.png" alt="Mapa" className="map-preview" />
+                            <img src="/static/images/map.png" alt="Mapa" className="map-preview" />
                         </div>
                     </div>
                     <div className="right-column">

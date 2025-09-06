@@ -13,6 +13,8 @@ import ProtectedRoute from "./routes/ProtectedRoute";
 import AdminRoute from "./routes/AdminRoute";
 import Forbidden from "./pages/Forbidden";
 import NoAuthRoute from "./routes/NoAuthRoute"; 
+import Pacientes from "./pages/Pacientes";
+import Resultados from "./pages/Resultados";
 
 export default function App() {
   return (
@@ -41,7 +43,9 @@ export default function App() {
             <Route index element={<Dashboard />} />
             <Route path="evaluaciones" element={<Evaluaciones />} />
             <Route path="historial" element={<Historial />} />
+            <Route path="resultados" element={<Resultados />} />
             <Route path="tests" element={<Tests />} />
+            <Route path="pacientes" element={<Pacientes />} />
 
             {/* Solo admin */}
             <Route

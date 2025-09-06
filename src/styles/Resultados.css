@@ -1,0 +1,99 @@
+/* Overlay del modal */
+.exit-modal {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+/* Contenedor principal del modal */
+.modal-content {
+  background: #fff;
+  padding: 24px;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 900px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+  animation: modal-pop 0.2s ease-out;
+}
+
+/* Animación sutil */
+@keyframes modal-pop {
+  from {
+    transform: scale(0.95);
+    opacity: 0.7;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Botones comunes */
+.btn-confirm-exit,
+.btn-cancel-exit,
+.btn-link {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.btn-confirm-exit {
+  background-color: #10b981; /* verde */
+  color: #fff;
+}
+.btn-confirm-exit:hover {
+  background-color: #0e9e6e;
+}
+
+.btn-cancel-exit {
+  background-color: #e5e7eb; /* gris */
+  color: #111;
+}
+.btn-cancel-exit:hover {
+  background-color: #d1d5db;
+}
+
+.btn-link {
+  background: none;
+  color: #2563eb; /* azul */
+  font-size: 0.95rem;
+  padding: 4px 8px;
+}
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+/* Tablas dentro de modales */
+.modal-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  font-size: 0.9rem;
+}
+
+.modal-content th,
+.modal-content td {
+  border: 1px solid #e5e7eb;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.modal-content th {
+  background-color: #f9fafb;
+  font-weight: 600;
+}
+
+.muted {
+  color: #6b7280;
+  font-style: italic;
+  text-align: center;
+}

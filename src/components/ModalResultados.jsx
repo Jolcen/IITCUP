@@ -4,13 +4,9 @@ import { supabase } from "../lib/supabaseClient";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import "../styles/ModalResultados.css";
+import { generarPDF_PAI } from "../pdf/ReportePAI";  // ⬅️ import del generador PDF
 
-import { jsPDF } from "jspdf";
-// autoTable lo dejamos por si luego quieres anexar tablas
-import autoTable from "jspdf-autotable";
-
-
-// Plantilla Excel empaquetada por Vite
+// Plantilla Excel empaquetada por Vite (PAI)
 import PAI_TEMPLATE_URL from "../assets/templates/Hoja-de-calculo-para-PAI-vacio.xlsx?url";
 
 const REQUERIDAS = ["PAI", "MMPI-2", "MCMI-IV"];
@@ -22,80 +18,33 @@ const PRUEBA_IMG = {
   DEFAULT: "static/images/testP.jpg",
 };
 
-  // Orden oficial (ajústalo si lo deseas)
-const PAI_VALIDES = ["INC","INF","IMN","IMP"];
-const PAI_CLINICAS = ["SOM","ANS","TRA","DEP","MAN","PAR","ESQ","LIM","ANT","ALC","DRG"];
-const PAI_TRAT = ["AGR","SUI","EST","FAS","RTR"];
-const PAI_INTERP = ["DOM","AFA"];
+// ====== Mapeos de escalas PAI para armar el JSON ======
+const CODES_CLINICAS   = ["SOM","ANS","TRA","DEP","MAN","PAR","ESQ","LIM","ANT","ALC","DRG"];
+const CODES_TRAT       = ["AGR","SUI","EST","FAS","RTR"];
+const CODES_INTERP     = ["DOM","AFA"];
 
-// Rango y bandas (aprox. a tu plantilla)
-const T_MIN = 20;
-const T_MAX = 110;
-
-// Colores
-const C_GREY = [120,120,120];
-const C_TEXT = [20,20,20];
-const C_GREEN = [198, 228, 214]; // verde claro (40-59)
-const C_GREYBAND = [230, 230, 230]; // 60-69
-const C_ORANGE = [247, 227, 200]; // 70-110
-const C_LINE = [30, 60, 90];      // polilínea
-const C_DOT = [30, 60, 90];
-
-// Convierte T a coordenada X
-const tToX = (t, x0, width) => {
-  if (t == null || isNaN(t)) return null;
-  const tt = Math.max(T_MIN, Math.min(T_MAX, Number(t)));
-  return x0 + ((tt - T_MIN) * width) / (T_MAX - T_MIN);
+// Ayudas
+const toIndex = (raw) => {
+  if (raw == null) return null;
+  const s = String(raw).trim().toLowerCase();
+  if (/^[0-3]$/.test(s)) return Number(s);
+  if (/^[1-4]$/.test(s)) return Number(s) - 1;
+  if (/^[a-d]$/.test(s)) return s.charCodeAt(0) - 97;
+  const m = { nada:0, poco:1, algo:2, mucho:3, af:0, lc:1, pc:2, mc:3 };
+  if (m.hasOwnProperty(s)) return m[s];
+  if (/absolut(a|amente)\s*falso/.test(s)) return 0;
+  if (/liger(amente)?/.test(s)) return 1;
+  if (/principal(mente)?/.test(s)) return 2;
+  if (/muy\s*cierto/.test(s)) return 3;
+  return null;
 };
 
-// Dibuja la regla horizontal con marcas
-function drawAxis(doc, x0, y, w) {
-  doc.setDrawColor(...C_GREY);
-  doc.setLineWidth(0.6);
-  doc.line(x0, y, x0 + w, y);
-
-  const ticks = [20,40,50,60,70,80,90,100,110];
-  doc.setFont("helvetica","normal");
-  doc.setFontSize(9);
-  doc.setTextColor(...C_GREY);
-  ticks.forEach(t => {
-    const xx = tToX(t, x0, w);
-    doc.line(xx, y-3, xx, y+3);
-    doc.text(String(t), xx-6, y+14);
-  });
-  doc.setTextColor(...C_TEXT);
-}
-
-// Dibuja bandas de fondo: 40-59 (verde), 60-69 (gris), 70-110 (naranja)
-function drawBands(doc, x0, yTop, h, w) {
-  // verde 40-59
-  let xA = tToX(40, x0, w);
-  let xB = tToX(59, x0, w);
-  doc.setFillColor(...C_GREEN);
-  doc.rect(xA, yTop, xB-xA, h, "F");
-
-  // gris 60-69
-  xA = tToX(60, x0, w);
-  xB = tToX(69, x0, w);
-  doc.setFillColor(...C_GREYBAND);
-  doc.rect(xA, yTop, xB-xA, h, "F");
-
-  // naranja 70-110
-  xA = tToX(70, x0, w);
-  xB = tToX(110, x0, w);
-  doc.setFillColor(...C_ORANGE);
-  doc.rect(xA, yTop, xB-xA, h, "F");
-}
-
-
+// =================== COMPONENTE ===================
 export default function ModalResultados({ open, onClose, caso }) {
   const [loading, setLoading] = useState(false);
   const [tests, setTests] = useState([]);
   const [attemptsByCode, setAttemptsByCode] = useState({});
-  const allReady = useMemo(
-    () => REQUERIDAS.every((c) => attemptsByCode[c]?.intentoId),
-    [attemptsByCode]
-  );
+  const allReady = useMemo(() => REQUERIDAS.every((c) => attemptsByCode[c]?.intentoId), [attemptsByCode]);
 
   const [showDetalle, setShowDetalle] = useState(false);
   const [detalleTest, setDetalleTest] = useState(null);
@@ -104,18 +53,16 @@ export default function ModalResultados({ open, onClose, caso }) {
 
   const [showPerfil, setShowPerfil] = useState(false);
 
+  // Carga pruebas + últimos intentos terminados
   useEffect(() => {
     if (!open || !caso?.id) return;
     (async () => {
       setLoading(true);
-      setTests([]);
-      setAttemptsByCode({});
+      setTests([]); setAttemptsByCode({});
       try {
         const { data: pruebas } = await supabase
-          .from("pruebas")
-          .select("id,codigo,nombre")
-          .in("codigo", REQUERIDAS)
-          .order("nombre");
+          .from("pruebas").select("id,codigo,nombre")
+          .in("codigo", REQUERIDAS).order("nombre");
 
         const { data: intents } = await supabase
           .from("intentos_prueba")
@@ -123,175 +70,156 @@ export default function ModalResultados({ open, onClose, caso }) {
           .eq("caso_id", caso.id)
           .order("terminado_en", { ascending: false, nullsLast: true });
 
-        const lastDoneByPrueba = {};
+        const lastDone = {};
         (intents || []).forEach((it) => {
           if (!it.terminado_en) return;
-          if (!lastDoneByPrueba[it.prueba_id]) lastDoneByPrueba[it.prueba_id] = it;
+          if (!lastDone[it.prueba_id]) lastDone[it.prueba_id] = it;
         });
 
         const list = (pruebas || []).map((p) => {
-          const intento = lastDoneByPrueba[p.id];
+          const intento = lastDone[p.id];
           return {
-            id: p.id,
-            codigo: p.codigo,
-            nombre: p.nombre,
+            id: p.id, codigo: p.codigo, nombre: p.nombre,
             img: PRUEBA_IMG[p.codigo] || PRUEBA_IMG.DEFAULT,
-            done: !!intento,
-            intentoId: intento?.id || null,
+            done: !!intento, intentoId: intento?.id || null,
           };
         });
 
         const attempts = {};
-        list.forEach((t) => {
-          if (t.done) attempts[t.codigo] = { intentoId: t.intentoId };
-        });
+        list.forEach((t) => { if (t.done) attempts[t.codigo] = { intentoId: t.intentoId }; });
 
-        setTests(list);
-        setAttemptsByCode(attempts);
-      } finally {
-        setLoading(false);
-      }
+        setTests(list); setAttemptsByCode(attempts);
+      } finally { setLoading(false); }
     })();
   }, [open, caso?.id]);
 
+  // Abrir detalle y cargar puntajes del intento
   const abrirDetalle = async (t) => {
     if (!t?.done || !t?.intentoId) return;
-    setDetalleTest(t);
-    setShowDetalle(true);
-    setPuntajes([]);
-    setPuntajesLoading(true);
+    setDetalleTest(t); setShowDetalle(true); setPuntajes([]); setPuntajesLoading(true);
     try {
       const { data } = await supabase
-        .from("puntajes")
-        .select("escala, puntaje_conv")
-        .eq("intento_id", t.intentoId)
-        .order("escala");
+        .from("puntajes").select("escala, puntaje_conv")
+        .eq("intento_id", t.intentoId).order("escala");
       setPuntajes(data || []);
-    } finally {
-      setPuntajesLoading(false);
-    }
+    } finally { setPuntajesLoading(false); }
   };
+  const cerrarDetalle = () => { setShowDetalle(false); setDetalleTest(null); setPuntajes([]); };
 
-  const cerrarDetalle = () => {
-    setShowDetalle(false);
-    setDetalleTest(null);
-    setPuntajes([]);
-  };
-
-  // --------- Helpers exportación ----------
-  const toIndex = (raw) => {
-    if (raw == null) return null;
-    const s = String(raw).trim().toLowerCase();
-    if (/^[0-3]$/.test(s)) return Number(s);
-    if (/^[1-4]$/.test(s)) return Number(s) - 1;
-    if (/^[a-d]$/.test(s)) return s.charCodeAt(0) - 97;
-    const m = { nada: 0, poco: 1, algo: 2, mucho: 3, af: 0, lc: 1, pc: 2, mc: 3 };
-    if (m.hasOwnProperty(s)) return m[s];
-    if (/absolut(a|amente)\s*falso/.test(s)) return 0;
-    if (/liger(amente)?/.test(s)) return 1;
-    if (/principal(mente)?/.test(s)) return 2;
-    if (/muy\s*cierto/.test(s)) return 3;
-    return null;
-  };
-
+  // ================== EXPORTAR EXCEL (PAI) ==================
   async function exportarExcelPAI(t, caso) {
     try {
-      if (!t?.intentoId) {
-        alert("No hay intento para exportar.");
-        return;
-      }
+      if (!t?.intentoId) { alert("No hay intento para exportar."); return; }
 
-      // 1) Traer TODAS las respuestas del intento con el orden del ítem
       const { data: rows, error } = await supabase
         .from("respuestas")
-        .select(`
-          item_id,
-          valor,
-          items_prueba!inner(orden)
-        `)
+        .select(`item_id, valor, items_prueba!inner(orden)`)
         .eq("intento_id", t.intentoId)
         .order("orden", { ascending: true, foreignTable: "items_prueba" });
-
       if (error) throw error;
 
-      // 2) Plantilla
       const resp = await fetch(PAI_TEMPLATE_URL);
       if (!resp.ok) throw new Error("No pude cargar la plantilla del Excel.");
       const ab = await resp.arrayBuffer();
       const wb = XLSX.read(ab);
-      const ws =
-        wb.Sheets["Hoja de Captura"] ||
-        wb.Sheets["Hoja de captura"] ||
-        wb.Sheets[wb.SheetNames[0]];
+      const ws = wb.Sheets["Hoja de Captura"] || wb.Sheets["Hoja de captura"] || wb.Sheets[wb.SheetNames[0]];
       if (!ws) throw new Error("La plantilla no tiene la hoja 'Hoja de Captura'.");
 
-      // 3) Cabecera (opcional)
       if (caso) {
         ws["A1"] = { t: "s", v: caso.paciente_nombre || "" };
         ws["A2"] = { t: "s", v: caso.paciente_ci || "" };
       }
 
-      // 4) Construir índice: número de ítem (col A) → fila exacta
-      const idxByItem = new Map(); // itemNo:number -> row:number
-      const MAX_SCAN = 2000;       // rango generoso
-      for (let r = 1; r <= MAX_SCAN; r++) {
-        const cell = ws["A" + r];
-        if (!cell || cell.v == null) continue;
-        let v = cell.v;
-        if (typeof v === "string") v = v.trim();
-        const n = parseInt(v, 10);
-        if (!Number.isNaN(n)) {
-          // guarda solo si es un número de ítem plausible
-          if (n >= 1 && n <= 1000 && !idxByItem.has(n)) {
-            idxByItem.set(n, r);
-          }
-        }
+      const idxByItem = new Map();
+      for (let r = 1; r <= 2000; r++) {
+        const cell = ws["A"+r]; if (!cell || cell.v == null) continue;
+        const n = parseInt(String(cell.v).trim(),10);
+        if (!Number.isNaN(n) && n>=1 && n<=1000 && !idxByItem.has(n)) idxByItem.set(n,r);
       }
 
-      // 5) Escribir "x" por cada respuesta, usando la fila encontrada
-      const COLS = ["C", "D", "E", "F"];
+      const COLS = ["C","D","E","F"];
       let maxRowTouched = 1;
-
       rows.forEach((r, i) => {
-        const ord = Number(r?.items_prueba?.orden) || (i + 1);
-        const row = idxByItem.get(ord); // ← fila real en la plantilla
-        if (!row) return;               // si no está, no marcamos (plantilla incompleta)
-
-        // limpia C..F de esa fila antes de marcar
-        COLS.forEach((col) => delete ws[`${col}${row}`]);
-
+        const ord = Number(r?.items_prueba?.orden) || (i+1);
+        const row = idxByItem.get(ord); if (!row) return;
+        COLS.forEach((c)=> delete ws[`${c}${row}`]);
         const index = toIndex(r.valor);
-        if (index != null && index >= 0 && index <= 3) {
-          ws[`${COLS[index]}${row}`] = { t: "s", v: "x", w: "x" };
-          if (row > maxRowTouched) maxRowTouched = row;
+        if (index!=null && index>=0 && index<=3) {
+          ws[`${COLS[index]}${row}`] = { t:"s", v:"x", w:"x" };
+          if (row>maxRowTouched) maxRowTouched=row;
         }
       });
 
-      // 6) Ajustar rango visible de la hoja
       const ref = ws["!ref"] || "A1:H1";
       const m = ref.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/i);
       ws["!ref"] = m ? `${m[1]}${m[2]}:${m[3]}${Math.max(maxRowTouched, Number(m[4]) || 1)}`
-                     : `A1:H${Math.max(maxRowTouched, 1)}`;
+                     : `A1:H${Math.max(maxRowTouched,1)}`;
 
-      // 7) Descargar archivo
-      const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
-      const blob = new Blob([out], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-      const nombre = `PAI_${caso?.paciente_ci || ""}_${t.intentoId.slice(0, 6)}.xlsx`;
+      const out = XLSX.write(wb, { type:"array", bookType:"xlsx" });
+      const blob = new Blob([out], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const nombre = `PAI_${caso?.paciente_ci || ""}_${t.intentoId.slice(0,6)}.xlsx`;
       saveAs(blob, nombre);
     } catch (e) {
-      console.error(e);
-      alert(e.message || "No pude exportar el Excel.");
+      console.error(e); alert(e.message || "No pude exportar el Excel.");
     }
   }
 
-  return open ? (
+  // ================== EXPORTAR PDF (PAI) ==================
+  /** Construye el JSON que espera generarPDF_PAI() a partir de 'caso' y 'puntajes' */
+  function buildPaiJson(caso, puntajes) {
+    // Mapa: código → T (puntaje_conv)
+    const byCode = {};
+    (puntajes || []).forEach(p => { byCode[String(p.escala).toUpperCase()] = Number(p.puntaje_conv); });
+    const t = (code) => (byCode[code] ?? null);
+
+    // Helpers para armar subescalas (sin bruto por ahora)
+    const mkSubs = (codes) => codes
+      .filter(c => byCode[c] != null)
+      .map(c => ({ nombre: c, bruto: "", t: byCode[c] }));
+
+    // Serie para gráfico (usa primeros 6 valores de la sección si existen)
+    const serie = (codes) => mkSubs(codes).slice(0, 6).map(s => s.t);
+
+    return {
+      informe: {
+        titulo: "Perfil PAI",
+        institucion: "Sistema de Evaluación Psicológica",
+        fecha: new Date().toISOString().slice(0,10),
+      },
+      evaluado: {
+        nombre: caso?.paciente_nombre || "",
+        edad: caso?.paciente_edad ?? "",
+        sexo: caso?.paciente_sexo || "",
+        id: caso?.paciente_ci || "",
+      },
+      secciones: [
+        { titulo: "CLÍNICA",        subescalas: mkSubs(CODES_CLINICAS),   graficoT: serie(CODES_CLINICAS) },
+        { titulo: "TRATAMIENTO",    subescalas: mkSubs(CODES_TRAT),       graficoT: serie(CODES_TRAT) },
+        { titulo: "INTERPERSONAL",  subescalas: mkSubs(CODES_INTERP),     graficoT: serie(CODES_INTERP) },
+      ],
+    };
+  }
+
+  const onExportPdfPAI = () => {
+    if (detalleTest?.codigo !== "PAI") {
+      alert("Por ahora el PDF está implementado para PAI.");
+      return;
+    }
+    if (!puntajes || puntajes.length === 0) {
+      alert("No hay puntajes calculados para este intento.");
+      return;
+    }
+    const json = buildPaiJson(caso, puntajes);
+    generarPDF_PAI(json); // ⬅️ genera y descarga el PDF
+  };
+
+  // ================== RENDER ==================
+  if (!open) return null;
+
+  return (
     <div
       className="modal-overlay"
-      onMouseDown={(e) => {
-        if (e.target.classList.contains("modal-overlay")) onClose?.();
-      }}
+      onMouseDown={(e) => { if (e.target.classList.contains("modal-overlay")) onClose?.(); }}
     >
       <div className="modal pruebas-modal mr-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head mr-header">
@@ -345,9 +273,7 @@ export default function ModalResultados({ open, onClose, caso }) {
         {showDetalle && (
           <div
             className="modal-overlay nested"
-            onMouseDown={(e) => {
-              if (e.target.classList.contains("modal-overlay")) cerrarDetalle();
-            }}
+            onMouseDown={(e) => { if (e.target.classList.contains("modal-overlay")) cerrarDetalle(); }}
           >
             <div className="modal result-modal" onMouseDown={(e) => e.stopPropagation()}>
               <div className="modal-head">
@@ -360,18 +286,14 @@ export default function ModalResultados({ open, onClose, caso }) {
 
               <div className="result-body" style={{ display: "block" }}>
                 {puntajesLoading && <div className="muted">Cargando puntajes…</div>}
-
                 {!puntajesLoading && puntajes.length === 0 && (
                   <div className="muted">Aún no hay resultados calculados para esta prueba.</div>
                 )}
-
                 {!puntajesLoading && puntajes.length > 0 && (
                   <table className="table-mini" style={{ width: "100%" }}>
-                    <thead>
-                      <tr><th>Escala</th><th>Valor</th></tr>
-                    </thead>
+                    <thead><tr><th>Escala</th><th>Valor</th></tr></thead>
                     <tbody>
-                      {puntajes.slice(0, 12).map((r, i) => (
+                      {puntajes.slice(0, 20).map((r, i) => (
                         <tr key={i}><td>{r.escala}</td><td>{String(r.puntaje_conv)}</td></tr>
                       ))}
                     </tbody>
@@ -392,8 +314,10 @@ export default function ModalResultados({ open, onClose, caso }) {
                 >
                   📁 Exportar Excel
                 </button>
-                <button className="btn-soft" onClick={() => alert("Exportar PDF (pendiente)")}>
-                  📄 Exportar PDF
+
+                {/* === Botón funcional que arma JSON y genera PDF === */}
+                <button className="btn-soft" onClick={onExportPdfPAI}>
+                  📄 Exportar PDF (PAI)
                 </button>
               </div>
             </div>
@@ -403,9 +327,7 @@ export default function ModalResultados({ open, onClose, caso }) {
         {showPerfil && (
           <div
             className="modal-overlay nested"
-            onMouseDown={(e) => {
-              if (e.target.classList.contains("modal-overlay")) setShowPerfil(false);
-            }}
+            onMouseDown={(e) => { if (e.target.classList.contains("modal-overlay")) setShowPerfil(false); }}
           >
             <div className="modal result-modal" onMouseDown={(e) => e.stopPropagation()}>
               <div className="modal-head">
@@ -418,7 +340,6 @@ export default function ModalResultados({ open, onClose, caso }) {
                   Paciente: <strong>{caso?.paciente_nombre}</strong> · CI{" "}
                   <strong>{caso?.paciente_ci || "—"}</strong>
                 </p>
-
                 <div className="card" style={{ marginTop: 6 }}>
                   <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>Resumen</p>
                   <ul style={{ marginTop: 8, paddingLeft: 18 }}>
@@ -427,13 +348,13 @@ export default function ModalResultados({ open, onClose, caso }) {
                     <li>MCMI-IV: {attemptsByCode["MCMI-IV"] ? "completado ✅" : "pendiente"}</li>
                   </ul>
                   <p className="muted" style={{ marginTop: 8 }}>
-                    (Aquí irá el perfil generado por IA con formatos y gráficos — pendiente.)
+                    (Próximamente: perfil consolidado con IA y gráficos.)
                   </p>
                 </div>
               </div>
 
               <div className="result-actions">
-                <button className="btn-soft" onClick={() => alert("Exportar PDF del informe (pendiente)")}>
+                <button className="btn-soft" onClick={() => alert("Exportar informe PDF (pendiente)")}>
                   📄 Exportar informe PDF
                 </button>
               </div>
@@ -442,5 +363,5 @@ export default function ModalResultados({ open, onClose, caso }) {
         )}
       </div>
     </div>
-  ) : null;
+  );
 }

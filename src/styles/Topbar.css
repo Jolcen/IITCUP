@@ -1,13 +1,18 @@
-.topbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 20px 25px;
-    background-color: #fff;
-    border-bottom: 1px solid #ddd;
-
-    width: 100%;
+:root{
+  --topbar-h: 64px;   /* ajusta si tu topbar es más alto */
 }
+
+
+.topbar{
+    height: var(--topbar-h);
+    display: flex;
+    align-items: center;
+    /* si lo tienes fijo: */
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 1000;
+}
+
 
 .topbar h2 {
     font-size: 20px;

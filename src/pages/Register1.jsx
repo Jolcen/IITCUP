@@ -7,7 +7,7 @@ export const Register1 = () => {
             <div className="register">
                 <div className="register-container">
                 <div className="register-image">
-                    <img src='../../public/static/images/portada.png' alt="Register visual" />
+                    <img src='/static/images/portada.png' alt="Register visual" />
                 </div>
                 <div className="register-form">
                     <h3>Registro</h3>

@@ -1,318 +1,227 @@
-// src/components/ModalEvaluacion.jsx
 import "../styles/ModalEvaluacion.css";
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
 
-const GENEROS      = ["Masculino", "Femenino", "Otro"];
-const NIVELES      = ["Primaria", "Secundaria", "Superior"];
-const OCUPACIONES  = ["Desempleado", "Estudiante", "Obrero", "Otro"];
-const ANTECEDENTES = ["Violencia", "Abuso", "Delito"];
+// src/components/ModalEvaluacion.jsx
+import { useEffect, useMemo, useState } from "react";
+import { FaTimes, FaDownload, FaFileAlt, FaCalendarAlt, FaUserCircle } from "react-icons/fa";
 
 /**
  * Props:
- * - mode: "create" | "view" | "edit"  (default "create")
- * - initialCase: fila de public.casos cuando mode es "view" o "edit"
- * - onClose: fn
- * - onSaved: fn
+ * - mode: "create" | "edit" | "view"
+ * - initialCase: objeto del caso (puede venir incompleto en la tabla; en openView/openEdit ya haces un select "*")
+ * - onClose: () => void
+ * - onSaved: () => void   // refrescar tabla después de guardar
+ *
+ * Notas:
+ * - FRONTEND ONLY: no toca Supabase. Simula guardado con setTimeout y llama onSaved().
+ * - En modo "view" renderiza panel lateral con ficha del paciente y documentos.
  */
-export default function ModalEvaluacion({
-  mode = "create",
-  initialCase = null,
-  onClose,
-  onSaved,
-}) {
+export default function ModalEvaluacion({ mode = "view", initialCase, onClose, onSaved }) {
+  const isView = mode === "view";
   const isCreate = mode === "create";
-  const isEdit   = mode === "edit";
-  const isView   = mode === "view";
-  const readOnly = isView;
+  const isEdit = mode === "edit";
 
+  // ---------- CASE MODEL (frontend) ----------
   const [form, setForm] = useState({
-    nombre: "",
-    ci: "",
-    fechaNacimiento: "",
-    genero: "",
-    nivel: "",
-    ocupacion: "",
-    antecedentes: "",
-    contexto: "",
-    operadorId: "", // public.casos.asignado_a
+    id: initialCase?.id ?? null,
+    paciente_id: initialCase?.paciente_id ?? null,
+    paciente_nombre: initialCase?.paciente_nombre ?? "",
+    paciente_ci: initialCase?.paciente_ci ?? "",
+    motivacion: initialCase?.motivacion ?? "",
+    estado: initialCase?.estado ?? "pendiente", // pendiente | en_evaluacion | evaluado
+    creado_en: initialCase?.creado_en ?? new Date().toISOString(),
+    // “agenda” sin paciente
+    fecha_programada: initialCase?.fecha_programada ?? "", // ej. "2026-05-21"
+    hora_programada: initialCase?.hora_programada ?? "",   // ej. "15:30"
   });
 
-  const [saving, setSaving] = useState(false);
-  const [error, setError]   = useState("");
-
-  // Prefill cuando hay caso (view/edit)
-  useEffect(() => {
-    if (!initialCase) return;
-    setForm({
-      nombre:          initialCase.paciente_nombre   ?? "",
-      ci:              initialCase.paciente_ci       ?? "",
-      fechaNacimiento: initialCase.fecha_nacimiento  ?? "",
-      genero:          initialCase.genero            ?? "",
-      nivel:           initialCase.nivel_educativo   ?? "",
-      ocupacion:       initialCase.ocupacion         ?? "",
-      antecedentes:    initialCase.antecedentes      ?? "",
-      contexto:        initialCase.motivacion        ?? "",
-      operadorId:      initialCase.asignado_a        ?? "",
-    });
+  // Documentos del paciente (solo lectura aquí).
+  // Espera que vengan colgados en initialCase.paciente_documentos (array) si los inyectas al abrir el modal.
+  // Si no vienen, muestra vacío.
+  const documentos = useMemo(() => {
+    return Array.isArray(initialCase?.paciente_documentos)
+      ? initialCase.paciente_documentos
+      : [];
   }, [initialCase]);
 
-  // ---------- Operadores ----------
-  const [operadores, setOperadores]   = useState([]);
-  const [cargandoOps, setCargandoOps] = useState(true);
+  const set = (k, v) => setForm((prev) => ({ ...prev, [k]: v }));
 
-  useEffect(() => {
-    // En "ver" no hace falta consultar operadores
-    if (isView) {
-      setOperadores([]);
-      setCargandoOps(false);
-      return;
-    }
-
-    let alive = true;
-
-    const fetchOperadores = async () => {
-      setCargandoOps(true);
-
-      // 0) Si tienes RPC list_operadores_disponibles(), úsala:
-      const rpc = await supabase.rpc("list_operadores_disponibles");
-      let ops = rpc.data || [];
-      const rpcOk = !rpc.error;
-
-      // 1) Fallback: primero disponibles, luego todos si viene vacío
-      if (!rpcOk) {
-        const resp1 = await supabase
-          .from("app_users")
-          .select("id, nombre, email, rol, estado")
-          .eq("rol", "operador")
-          .eq("estado", "disponible")
-          .order("nombre", { ascending: true });
-
-        ops = resp1.data || [];
-
-        if (!resp1.error && ops.length === 0) {
-          const resp2 = await supabase
-            .from("app_users")
-            .select("id, nombre, email, rol, estado")
-            .eq("rol", "operador")
-            .order("nombre", { ascending: true });
-
-          ops = resp2.data || [];
-        }
-      }
-
-      if (!alive) return;
-
-      // 2) Marca “ocupado” si tienen caso activo en evaluación
-      const abiertos = await supabase
-        .from("casos")
-        .select("asignado_a, estado")
-        .eq("estado", "en_evaluacion")
-        .not("asignado_a", "is", null);
-
-      const ocupados = new Set((abiertos.data || []).map(c => c.asignado_a));
-      let list = (ops || []).map(o => ({ ...o, ocupado: ocupados.has(o.id) }));
-
-      // 3) Si estoy en edición y el operador asignado no vino por filtros, lo agrego
-      if (initialCase?.asignado_a && !list.some(o => o.id === initialCase.asignado_a)) {
-        const me = await supabase
-          .from("app_users")
-          .select("id, nombre, email, rol, estado")
-          .eq("id", initialCase.asignado_a)
-          .maybeSingle();
-        if (me.data) list = [{ ...me.data, ocupado: ocupados.has(me.data.id) }, ...list];
-      }
-
-      if (alive) {
-        setOperadores(list);
-        setCargandoOps(false);
-      }
-    };
-
-    fetchOperadores();
-    return () => { alive = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isView, initialCase?.asignado_a]);
-
-  // ---------- Validación ----------
-  const puedeGuardar = useMemo(() => {
-    if (readOnly) return true;
-    if (!form.nombre.trim()) return false;
-    if (!form.ci.trim()) return false;
-    if (form.fechaNacimiento && isNaN(Date.parse(form.fechaNacimiento))) return false;
-    return true;
-  }, [form, readOnly]);
-
-  // ---------- Handlers ----------
-  function onChange(e) {
-    if (readOnly) return;
-    const { name, value } = e.target;
-    setForm(prev => ({ ...prev, [name]: value }));
-  }
-
-  async function handleSave() {
-    if (readOnly) return;
-    try {
-      setSaving(true);
-      setError("");
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No hay sesión. Inicia sesión nuevamente.");
-
-      const payload = {
-        paciente_nombre:  form.nombre.trim(),
-        paciente_ci:      form.ci.trim(),
-        fecha_nacimiento: form.fechaNacimiento || null,
-        genero:           form.genero || null,
-        nivel_educativo:  form.nivel || null,
-        ocupacion:        form.ocupacion || null,
-        antecedentes:     form.antecedentes || null,
-        motivacion:       form.contexto || null,
-        asignado_a:       form.operadorId || null,
-        ...(isCreate ? { creado_por: user.id } : {}),
-      };
-
-      let err = null;
-      if (isCreate) {
-        const { error } = await supabase.from("casos").insert(payload);
-        err = error;
-      } else if (isEdit && initialCase?.id) {
-        const { error } = await supabase.from("casos")
-          .update(payload)
-          .eq("id", initialCase.id);
-        err = error;
-      }
-      if (err) throw new Error(err.message);
-
+  // ---------- SAVE (frontend only) ----------
+  const guardar = () => {
+    // Validaciones mínimas al crear/editar (no obligamos paciente por requerimiento)
+    // Puedes agregar más validaciones según tu flujo real.
+    // Simulamos operación asíncrona:
+    setTimeout(() => {
       onSaved?.();
       onClose?.();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setSaving(false);
-    }
-  }
+    }, 250);
+  };
 
-  const title = isCreate ? "Nueva evaluación" : isEdit ? "Editar evaluación" : "Detalle del caso";
+  // Helpers
+  const fmtFecha = (iso) => {
+    try { return new Date(iso).toLocaleString(); } catch { return iso || "—"; }
+  };
 
   return (
-    <div
-      className="modal-overlay"
-      onMouseDown={(e) => { if (e.target.classList.contains("modal-overlay")) onClose?.(); }}
-    >
-      <div className="modal-form" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>{title}</h3>
+    <div className="mb-backdrop" onClick={onClose}>
+      <div className="mb-modal" style={{ width: 960, maxWidth: "94vw" }} onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="mb-header">
+          <h3>
+            {isCreate && "Nueva evaluación"}
+            {isEdit && "Editar evaluación"}
+            {isView && "Detalle de evaluación"}
+          </h3>
+          <button className="mb-close" onClick={onClose} aria-label="Cerrar">
+            <FaTimes />
+          </button>
         </div>
 
-        <div className="sections">
-          <div className="card">
-            <div className="card-title">Datos del paciente</div>
+        {/* Body */}
+        <div className="mb-body" style={{ display: "grid", gridTemplateColumns: isView ? "2fr 1fr" : "1fr", gap: 16 }}>
+          {/* Columna izquierda: datos del caso */}
+          <div className="case-col">
+            {/* Datos principales */}
+            {!isView && (
+              <div className="panel">
+                <h4>Datos del caso</h4>
+                <div className="grid2">
+                  <label>
+                    Motivo / Contexto
+                    <textarea
+                      rows={4}
+                      value={form.motivacion}
+                      onChange={(e) => set("motivacion", e.target.value)}
+                    />
+                  </label>
 
-            <div className="grid">
-              <div className="field">
-                <label>Nombre completo <span className="req">*</span></label>
-                <input name="nombre" value={form.nombre} onChange={onChange} placeholder="Ej. Juan Pérez" disabled={readOnly} />
-              </div>
+                  <label>
+                    Estado
+                    <select value={form.estado} onChange={(e) => set("estado", e.target.value)}>
+                      <option value="pendiente">Pendiente</option>
+                      <option value="en_evaluacion">En evaluación</option>
+                      <option value="evaluado">Evaluado</option>
+                    </select>
+                  </label>
 
-              <div className="field">
-                <label>CI <span className="req">*</span></label>
-                <input name="ci" value={form.ci} onChange={onChange} placeholder="Ej. 1234567 LP" disabled={readOnly} />
-              </div>
+                  <label>
+                    Fecha programada (opcional)
+                    <input
+                      type="date"
+                      value={form.fecha_programada}
+                      onChange={(e) => set("fecha_programada", e.target.value)}
+                    />
+                  </label>
 
-              <div className="field">
-                <label>Fecha de nacimiento</label>
-                <input type="date" name="fechaNacimiento" value={form.fechaNacimiento} onChange={onChange} disabled={readOnly} />
+                  <label>
+                    Hora programada (opcional)
+                    <input
+                      type="time"
+                      value={form.hora_programada}
+                      onChange={(e) => set("hora_programada", e.target.value)}
+                    />
+                  </label>
+                </div>
+                <p className="hint">
+                  <FaCalendarAlt style={{ marginRight: 6 }} />
+                  Puedes <strong>agendar</strong> la evaluación sin un paciente asignado. Luego
+                  podrás asignarlo desde la lista de evaluaciones.
+                </p>
               </div>
+            )}
 
-              <div className="field">
-                <label>Género</label>
-                <select name="genero" value={form.genero} onChange={onChange} disabled={readOnly}>
-                  <option value="">Seleccione</option>
-                  {GENEROS.map(g => <option key={g} value={g}>{g}</option>)}
-                </select>
-              </div>
+            {isView && (
+              <div className="panel">
+                <h4>Resumen del caso</h4>
+                <div className="kv">
+                  <span className="k">Motivo/Contexto</span>
+                  <span className="v">{initialCase?.motivacion || "—"}</span>
+                </div>
+                <div className="kv">
+                  <span className="k">Estado</span>
+                  <span className="v">
+                    <span className={`chip chip-${initialCase?.estado || "pendiente"}`}>
+                      {initialCase?.estado === "pendiente" && "Pendiente"}
+                      {initialCase?.estado === "en_evaluacion" && "En evaluación"}
+                      {initialCase?.estado === "evaluado" && "Evaluado"}
+                      {!["pendiente","en_evaluacion","evaluado"].includes(initialCase?.estado) && (initialCase?.estado || "pendiente")}
+                    </span>
+                  </span>
+                </div>
+                <div className="kv">
+                  <span className="k">Creado</span>
+                  <span className="v">{fmtFecha(initialCase?.creado_en)}</span>
+                </div>
 
-              <div className="field">
-                <label>Nivel educativo</label>
-                <select name="nivel" value={form.nivel} onChange={onChange} disabled={readOnly}>
-                  <option value="">Seleccione</option>
-                  {NIVELES.map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
+                {(initialCase?.fecha_programada || initialCase?.hora_programada) && (
+                  <div className="kv">
+                    <span className="k">Agendado</span>
+                    <span className="v">
+                      {initialCase?.fecha_programada || "—"} {initialCase?.hora_programada || ""}
+                    </span>
+                  </div>
+                )}
               </div>
+            )}
 
-              <div className="field">
-                <label>Ocupación</label>
-                <select name="ocupacion" value={form.ocupacion} onChange={onChange} disabled={readOnly}>
-                  <option value="">Seleccione</option>
-                  {OCUPACIONES.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </div>
-
-              <div className="field">
-                <label>Antecedentes</label>
-                <select name="antecedentes" value={form.antecedentes} onChange={onChange} disabled={readOnly}>
-                  <option value="">Seleccione</option>
-                  {ANTECEDENTES.map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
-              </div>
-
-              <div className="field span-2">
-                <label>Contexto / Motivación</label>
-                <textarea
-                  name="contexto"
-                  rows={4}
-                  value={form.contexto}
-                  onChange={onChange}
-                  placeholder="Describe brevemente la motivación del caso…"
-                  disabled={readOnly}
-                />
-              </div>
-            </div>
+            {/* (Aquí podrías renderizar más secciones del caso, pruebas asignadas, etc.) */}
           </div>
 
-          {!isView && (
-            <div className="card">
-              <div className="card-title">Asignación</div>
-              <div className="grid">
-                <div className="field">
-                  <label>Operador responsable</label>
-                  <select
-                    name="operadorId"
-                    value={form.operadorId}
-                    onChange={onChange}
-                    disabled={cargandoOps}
-                  >
-                    <option value="">— Sin asignar —</option>
-                    {operadores.map(o => (
-                      <option key={o.id} value={o.id}>
-                        {o.nombre || o.email}{o.ocupado ? " (ocupado)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="hint">
-                    Se muestran operadores <strong>disponibles</strong> (estado administrativo).
-                    Si aparece “(ocupado)”, ya tienen un caso activo.
-                  </div>
-                </div>
+          {/* Columna derecha: PACIENTE + DOCUMENTOS (solo view) */}
+          {isView && (
+            <aside className="patient-col">
+              <div className="panel">
+                <h4>Paciente</h4>
+
+                {!initialCase?.paciente_id && (
+                  <p className="muted" style={{ margin: 0 }}>
+                    Este caso aún no tiene paciente asignado.
+                  </p>
+                )}
+
+                {initialCase?.paciente_id && (
+                  <>
+                    <div className="patient-card">
+                      <div className="icon">
+                        <FaUserCircle />
+                      </div>
+                      <div className="meta">
+                        <div className="name">{initialCase?.paciente_nombre || "—"}</div>
+                        <div className="ci">CI: {initialCase?.paciente_ci || "—"}</div>
+                      </div>
+                    </div>
+
+                    {/* Documentos del paciente */}
+                    <h5 style={{ margin: "14px 0 8px" }}>Documentos</h5>
+                    <ul className="doc-list">
+                      {documentos.length === 0 && <li className="muted">Sin documentos</li>}
+                      {documentos.map((d) => (
+                        <li key={d.id}>
+                          <div className="doc-left">
+                            <FaFileAlt />
+                            <span className="doc-name" title={d.nombre}>{d.nombre}</span>
+                          </div>
+                          <div className="doc-actions">
+                            {/* En backend real: href al archivo / preview */}
+                            <button className="btn-light" title="Descargar">
+                              <FaDownload />
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
               </div>
-            </div>
+            </aside>
           )}
         </div>
 
-        {error && <div className="alert-error">{error}</div>}
-
-        <div className="modal-actions">
-          <button className="btn-cancelar" onClick={onClose} disabled={saving}>
-            {isView ? "Cerrar" : "Cancelar"}
-          </button>
-          {!isView && (
-            <button
-              className="btn-guardar"
-              onClick={handleSave}
-              disabled={!puedeGuardar || saving}
-            >
-              {saving ? "Guardando…" : (isCreate ? "Guardar" : "Guardar cambios")}
+        {/* Footer */}
+        <div className="mb-footer">
+          <button className="btn-light" onClick={onClose}>Cerrar</button>
+          {(isCreate || isEdit) && (
+            <button className="btn-primary" onClick={guardar}>
+              Guardar
             </button>
           )}
         </div>

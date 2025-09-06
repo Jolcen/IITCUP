@@ -1,74 +1,132 @@
-// supabase/functions/create-staff/index.ts
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
+// Deno Edge Function: crear usuario (Auth Admin) + fila en app_users + log (extras SOLO al log)
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const SUPABASE_URL  = Deno.env.get("SB_URL")  ?? Deno.env.get("SUPABASE_URL")!;
-const ANON_KEY      = Deno.env.get("SB_ANON_KEY") ?? Deno.env.get("SUPABASE_ANON_KEY")!;
-const SERVICE_ROLE  = Deno.env.get("SB_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+};
+
+const ALLOWED_ROLES = new Set([
+  "administrador",
+  "encargado",
+  "operador",
+  "secretario",
+  "asistente",
+]);
 
 serve(async (req) => {
+  // Preflight CORS
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   try {
-    if (req.method === "OPTIONS") {
-      return new Response("ok", {
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-          "Access-Control-Allow-Methods": "POST, OPTIONS",
-        },
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+
+    // Cliente con el JWT del usuario que invoca (desde tu web)
+    const jwt = req.headers.get("Authorization")?.replace("Bearer ", "") ?? "";
+    const authed = createClient(supabaseUrl, jwt, { auth: { persistSession: false } });
+
+    const me = await authed.auth.getUser();
+    const meId = me.data.user?.id ?? null;
+    if (!meId) {
+      return new Response(JSON.stringify({ error: "No session" }), { status: 401, headers: corsHeaders });
+    }
+
+    // Verificar que quien invoca sea administrador
+    const { data: meRow, error: meErr } = await authed
+      .from("app_users").select("rol").eq("id", meId).single();
+    if (meErr) {
+      return new Response(JSON.stringify({ error: "No se pudo verificar el rol del usuario actual", detail: meErr.message }), { status: 400, headers: corsHeaders });
+    }
+    if (meRow?.rol !== "administrador") {
+      return new Response(JSON.stringify({ error: "Solo administrador" }), { status: 403, headers: corsHeaders });
+    }
+
+    // Body
+    const body = await req.json();
+    const {
+      email,
+      password,
+      nombre,
+      rol,
+      estado = "Disponible",
+      ...extra // estos NO se insertan en app_users; solo van al log
+    } = body ?? {};
+
+    if (!email || !password || !nombre || !rol) {
+      return new Response(JSON.stringify({ error: "Faltan campos obligatorios (email, password, nombre, rol)" }), {
+        status: 400, headers: corsHeaders
       });
     }
 
-    const input = await req.json();
-    const { email, password, nombre, rol, ...extras } = input ?? {};
+    if (!ALLOWED_ROLES.has(String(rol))) {
+      return new Response(JSON.stringify({ error: "Rol no válido" }), { status: 400, headers: corsHeaders });
+    }
 
-    // Cliente con el token del solicitante (para verificar ADMIN)
-    const supa = createClient(SUPABASE_URL, ANON_KEY, {
-      global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+    // 1) Crear usuario en Auth
+    const { data: created, error: eCreate } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
     });
 
-    // Debe haber sesión
-    const { data: me } = await supa.auth.getUser();
-    const meId = me.user?.id;
-    if (!meId) return json(401, { error: "No autenticado" });
+    if (eCreate) {
+      // Duplicado de email en Auth
+      const code = String(eCreate.status ?? eCreate.code ?? "");
+      const msg  = eCreate.message ?? String(eCreate);
+      const status = code === "422" || /already/i.test(msg) ? 409 : 400;
+      return new Response(JSON.stringify({ error: "No se pudo crear en Auth", detail: msg }), {
+        status, headers: corsHeaders
+      });
+    }
 
-    // Debe ser admin (policy self-select permite leer su propia fila)
-    const { data: row, error: e0 } = await supa.from("app_users").select("rol").eq("id", meId).maybeSingle();
-    if (e0) return json(400, { error: e0.message });
-    if (row?.rol !== "administrador") return json(403, { error: "Solo admin" });
+    const authUser = created!.user;
 
-    // Validaciones básicas
-    if (!email || !password || !nombre || !rol) return json(400, { error: "Faltan email, password, nombre o rol" });
+    // 2) Insertar SOLO columnas existentes en app_users
+    const insertPayload = {
+      id: authUser.id,
+      email,
+      nombre,
+      rol,
+      estado,
+    };
+    const { error: eInsert } = await admin.from("app_users").insert(insertPayload);
+    if (eInsert) {
+      // Si falla la fila, borrar el usuario Auth para no dejar huérfanos
+      await admin.auth.admin.deleteUser(authUser.id);
+      return new Response(JSON.stringify({ error: "No se pudo insertar en app_users", detail: eInsert.message }), {
+        status: 400, headers: corsHeaders
+      });
+    }
 
-    // Cliente admin para crear usuario y escribir sin RLS
-    const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
-
-    // 1) Crear en Auth (confirmado)
-    const { data: created, error: e1 } = await admin.auth.admin.createUser({
-      email, password, email_confirm: true, user_metadata: { nombre }
+    // 3) Log (incluimos todos los extras para auditoría)
+    const ip = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "";
+    const ua = req.headers.get("user-agent") || "";
+    await admin.from("logs").insert({
+      usuario_id: meId,
+      accion: "CREATE",
+      entidad: "app_users",
+      entidad_id: authUser.id,
+      fecha: new Date().toISOString(),
+      detalle: "Alta de usuario por administrador",
+      data: { ...insertPayload, extra },
+      ip,
+      user_agent: ua,
     });
-    if (e1) return json(400, { error: e1.message });
-    const newId = created.user?.id;
-    if (!newId) return json(500, { error: "No se obtuvo el id del usuario" });
 
-    // 2) Insertar perfil en app_users
-    const { error: e2 } = await admin.from("app_users").insert({ id: newId, nombre, email, rol });
-    if (e2) return json(400, { error: e2.message });
-
-    // 3) (Opcional) Guardar extras en staff_profile si la tienes
-    // await admin.from("staff_profile").insert({ user_id: newId, ...extras });
-
-    return json(200, { ok: true, user_id: newId });
-  } catch (e) {
-    return json(500, { error: e?.message ?? "Error inesperado" });
+    return new Response(JSON.stringify({ ok: true, id: authUser.id }), {
+      status: 200,
+      headers: corsHeaders,
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: "Excepción no controlada", detail: String(err?.message ?? err) }), {
+      status: 500,
+      headers: corsHeaders,
+    });
   }
 });
-
-function json(status: number, body: unknown) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-    },
-  });
-}

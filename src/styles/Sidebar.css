@@ -201,3 +201,18 @@
   background: #fee2e2;
   transform: scale(1.05);
 }
+
+/* convierte la tarjeta en botón sin estilos de <button> */
+.user-card.as-button {
+  border: 0;
+  border-top: 1px solid #c9bcbc;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  cursor: pointer;
+}
+.user-card.as-button:focus { outline: 2px solid #c7d2fe; outline-offset: 2px; }
+
+.user-card.as-button{ background:transparent; border:0; width:100%; text-align:left; padding:0; cursor:pointer; }
+.user-card.as-button:focus{ outline:2px solid #c7d2fe; outline-offset:2px; }

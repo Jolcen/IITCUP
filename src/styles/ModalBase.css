@@ -1,0 +1,16 @@
+/* src/components/ModalBase.css */
+.mb-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:9999; }
+.mb-modal{ width:720px; max-width:92vw; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.2); }
+.mb-header{ display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid #eee; }
+.mb-close{ border:0; background:transparent; font-size:22px; cursor:pointer; }
+.mb-body{ padding:14px 16px; display:grid; gap:10px; }
+.grid2{ grid-template-columns:1fr 1fr; }
+.grid2 label{ display:flex; flex-direction:column; gap:6px; }
+.grid2 .col2{ grid-column:span 2; }
+.mb-body input, .mb-body select, .mb-body textarea{ border:1px solid #d7dbe2; border-radius:8px; padding:8px 10px; }
+.mb-footer{ padding:12px 16px; border-top:1px solid #eee; display:flex; justify-content:flex-end; gap:10px; }
+.btn-primary{ background:#2563eb; color:#fff; border:0; border-radius:10px; padding:10px 12px; font-weight:700; cursor:pointer; }
+.btn-light{ background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:8px 10px; cursor:pointer; }
+.drop{ background:#f8fafc; border:1px dashed #cbd5e1; padding:16px; border-radius:10px; text-align:center; }
+.doc-list{ list-style:none; margin:0; padding:0; display:grid; gap:8px; }
+.doc-list li{ display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:#f1f5f9; border-radius:8px; }

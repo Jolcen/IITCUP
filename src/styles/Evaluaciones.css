@@ -1,27 +1,37 @@
-.evaluaciones-page {
-  padding: 24px;
+
+:root { --topbar-h: 64px; }
+
+/* ----- Layout de página ----- */
+.evaluaciones-page{
+  height: calc(95vh - var(--topbar-h));   /* ocupa exactamente el alto disponible */
+  overflow: hidden;                        /* sin scroll en la página */
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 16px 24px;
   background: #f7f8fb;
-  min-height: 100vh;
 }
 
-/* Header */
-.header {
+/* ----- Header superior ----- */
+.header{
+  flex: 0 0 auto;
   display: flex;
   justify-content: space-between;
   gap: 16px;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
-.header h2 { margin: 0; }
-.header p { margin: 4px 0 0; color: #64748b; }
+.header h2{ margin: 0; }
+.header p{ margin: 4px 0 0; color: #64748b; }
 
-.actions-right {
+/* Acciones (buscador, filtro, botón) */
+.actions-right{
   display: flex;
   gap: 10px;
   align-items: center;
 }
 
-.searchbox {
+.searchbox{
   display: flex;
   align-items: center;
   gap: 8px;
@@ -30,13 +40,13 @@
   border-radius: 10px;
   padding: 8px 12px;
 }
-.searchbox input {
+.searchbox input{
   border: none;
   outline: none;
   font-size: 14px;
   width: 220px;
 }
-.filtro {
+.filtro{
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
@@ -44,9 +54,9 @@
 }
 
 /* Botón principal */
-.btn-add {
-  background-color: var(--primary-color);
-  color: white;
+.btn-add{
+  background-color: var(--primary-color, #2563eb);
+  color: #fff;
   padding: 10px 14px;
   border: none;
   border-radius: 10px;
@@ -55,112 +65,131 @@
   box-shadow: 0 3px 12px rgba(0,0,0,0.06);
 }
 
-/* Tabla */
-.table-container {
-  background: white;
+/* ----- Contenedor principal de la tabla ----- */
+.table-container{
+  flex: 1 1 auto;      /* ocupa todo el alto restante */
+  min-height: 0;       /* importante para que no fuerce scroll */
+  background: #fff;
   border-radius: 14px;
   padding: 14px 16px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+
+  display: flex;
+  flex-direction: column;   /* tabla arriba, paginación abajo */
+  gap: 8px;
 }
 
-table {
+/* ----- Tabla ----- */
+table{
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
-  table-layout: fixed; /* evita scroll horizontal */
+  table-layout: fixed;  /* evita scroll horizontal */
+  flex: 1 1 auto;       /* se estira en alto */
+  min-height: 0;
 }
-thead th {
+
+thead th{
   background: #f1f5f9;
   color: #334155;
   font-weight: 700;
   padding: 12px;
   border-radius: 8px;
 }
-tbody td {
-  padding: 12px;
+
+tbody td{
+  padding: 10px 12px;
   border-bottom: 1px dashed #eef2f7;
   vertical-align: middle;
 }
-tbody tr:hover {
-  background: #fafbff;
+
+tbody tr:hover{ background: #fafbff; }
+
+/* Altura de fila pensada para PAGE_SIZE=8 en 1080p */
+.table-container tbody tr{ height: 64px; }
+
+/* Columnas con cortes elegantes */
+.col-individuo, .col-detalles{
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.col-detalles{ color: #475569; }
+.col-ci, .col-fecha{ color: #475569; }
 
-/* columnas: cortes elegantes */
-.col-individuo, .col-detalles { overflow: hidden; text-overflow: ellipsis; }
-.col-detalles { max-width: 380px; color: #475569; }
-.col-ci, .col-fecha { color: #475569; }
-
-/* avatar + nombre */
-.avatar {
+/* Avatar + nombre */
+.avatar{
   font-size: 22px;
   color: #475569;
   margin-right: 8px;
 }
-.col-individuo {
+.col-individuo{
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.nombre { font-weight: 700; color: #111827; }
+.nombre{ font-weight: 700; color: #111827; }
 
-/* chips de estado */
-.chip {
+/* Chips de estado */
+.chip{
   padding: 6px 10px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
   display: inline-block;
+  white-space: nowrap;
 }
-.chip-pendiente { background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }
-.chip-en_evaluacion { background: #ecfeff; color: #155e75; border: 1px solid #67e8f9; }
-.chip-evaluado { background: #ecfdf5; color: #166534; border: 1px solid #86efac; }
+.chip-pendiente{ background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }
+.chip-en_evaluacion{ background: #ecfeff; color: #155e75; border: 1px solid #67e8f9; }
+.chip-evaluado{ background: #ecfdf5; color: #166534; border: 1px solid #86efac; }
 
-/* botones de acción */
-.col-acciones {
+/* Acciones por fila */
+.col-acciones{
   text-align: right;
   white-space: nowrap;
 }
-.btn {
+.col-acciones .actions-wrap{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn{
   appearance: none;
   border: 1px solid #e5e7eb;
   background: #fff;
   color: #0f172a;
-  padding: 7px 10px;
+  padding: 6px 10px;
   border-radius: 10px;
   cursor: pointer;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: 6px;
   box-shadow: 0 2px 6px rgba(0,0,0,0.05);
 }
-.btn svg { font-size: 13px; }
-.btn-sm { font-size: 12px; padding: 6px 10px; }
+.btn-sm{ font-size: 12px; }
+.btn svg{ font-size: 13px; }
 
-.btn-primary {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #fff;
+.btn-primary{ background: #2563eb; border-color: #2563eb; color: #fff; }
+.btn-light{ background: #fff; }
+.btn-danger{ background: #ef4444; border-color: #ef4444; color: #fff; }
+
+/* Estados vacíos/cargando */
+.muted{
+  color: #94a3b8;
+  text-align: center;
+  padding: 18px 0;
 }
-.btn-light { background: #fff; }
-.btn-danger {
-  background: #ef4444;
-  border-color: #ef4444;
-  color: #fff;
-}
 
-/* estados vacíos/cargando */
-.muted { color: #94a3b8; text-align: center; padding: 18px 0; }
-
-/* paginación */
-.pagination {
+/* ----- Paginación (pegada al fondo) ----- */
+.pagination{
+  margin-top: auto; /* empuja hacia abajo del card */
   display: flex;
   justify-content: center;
   gap: 6px;
-  margin-top: 14px;
 }
-.pg {
+.pg{
   background: #fff;
   border: 1px solid #e5e7eb;
   color: #0f172a;
@@ -170,127 +199,26 @@ tbody tr:hover {
   cursor: pointer;
   font-weight: 700;
 }
-.pg.active {
+.pg.active{
   background: #0ea5e9;
   border-color: #0ea5e9;
   color: #fff;
 }
-.pg:disabled {
+.pg:disabled{
   opacity: .45;
   cursor: not-allowed;
 }
 
-/* --- ACCIONES: más compactas y sin recortes --- */
-.col-acciones-header{
-  width: 260px;           /* sube o baja aquí si quieres más/menos ancho */
-
+/* ----- Responsivo (altos pequeños) ----- */
+@media (max-height: 900px){
+  .table-container tbody tr{ height: 60px; }
+}
+@media (max-height: 800px){
+  .table-container tbody tr{ height: 56px; }
 }
 
-tbody td.col-acciones{
-  overflow: visible;      /* evita que la celda recorte los botones */
-}
-
-.col-acciones{
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 6px;               /* menos separación */
-  white-space: nowrap;
-}
-
-/* botones compactos */
-.col-acciones .btn{
-  font-size: 12px;        /* bajamos tamaño de letra */
-  padding: 4px 8px;       /* menos padding */
-  border-radius: 6px;
-  line-height: 1;         /* más compacto */
-  min-width: auto;
-}
-.col-acciones .btn svg{
-  font-size: 12px;        /* iconos a juego */
-}
-
-/* si el ancho de pantalla baja, pasamos a icon-only */
+/* ----- Responsivo (ancho pequeño: oculta textos de botones de acción) ----- */
 @media (max-width: 1400px){
-  .col-acciones-header{ width: 150px; }
-  .col-acciones .btn{ padding: 6px; }
   .col-acciones .btn span{ display: none; }
-}
-
-/* altura mínima consistente por fila (ajústalo al tamaño de tu avatar) */
-.table-container tbody tr {
-  height: 88px;                 /* 80–96px suele ir perfecto */
-}
-
-/* centrado vertical de la columna Acción */
-.table-container tbody td.col-acciones {
-  display: flex;
-  align-items: center;           /* centra verticalmente */
-  justify-content: flex-end;     /* a la derecha */
-  padding-top: 0;                /* evita empujes por padding */
-  padding-bottom: 0;
-  overflow: visible;             /* no recortar botones */
-}
-
-/* botones compactos (mantén lo que ya tienes) */
-.col-acciones .btn {
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  line-height: 1;
-  min-width: auto;
-}
-.col-acciones .btn svg { font-size: 12px; }
-
-/* ancho de cabecera para que entren los 3 botones sin cortar */
-.col-acciones-header { width: 260px; text-align: right; }
-
-/* icon-only en pantallas más angostas */
-@media (max-width: 1400px){
-  .col-acciones-header{ width: 150px; }
-  .col-acciones .btn{ padding: 6px; }
-  .col-acciones .btn span{ display: none; }
-}
-
-/* Altura de fila consistente (ajústala a tu avatar) */
-.table-container tbody tr {
-  height: 88px;
-}
-
-/* El TD vuelve a ser table-cell y centramos vertical con el contenedor interno */
-.table-container tbody td.col-acciones {
-  display: table-cell !important;   /* fuerza a comportarse como celda */
-  vertical-align: middle;           /* centrado vertical real de celdas */
-  padding-top: 0;
-  padding-bottom: 0;
-  overflow: visible;
-}
-
-/* Contenedor interno que alinea los botones horizontalmente y los centra verticalmente */
-.col-acciones .actions-wrap {
-  display: flex;
-  align-items: center;              /* centrado vertical dentro del alto de la celda */
-  justify-content: flex-end;        /* a la derecha */
-  gap: 6px;
-  min-height: 64px;                 /* para coincidir con el avatar */
-}
-
-/* Botones compactos (mantén tus colores/estilos previos) */
-.col-acciones .btn {
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  line-height: 1;
-  min-width: auto;
-}
-.col-acciones .btn svg { font-size: 12px; }
-
-/* Ancho de la cabecera para que entren los 3 botones sin cortar */
-.col-acciones-header { width: 260px; text-align: right; }
-
-/* Icon-only en pantallas más angostas */
-@media (max-width: 1400px){
-  .col-acciones-header{ width: 150px; }
-  .col-acciones .btn{ padding: 6px; }
-  .col-acciones .btn span{ display: none; }
+  .btn{ padding: 6px; }
 }
