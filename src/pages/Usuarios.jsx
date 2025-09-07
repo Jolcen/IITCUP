@@ -1,7 +1,7 @@
-// src/pages/Usuarios.jsx
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import ModalUsuario from "../components/ModalUsuario";
+import ConfirmDialog from "../components/ConfirmDialog";
 import "../styles/Usuarios.css";
 
 export default function Usuarios() {
@@ -11,46 +11,102 @@ export default function Usuarios() {
   const [err, setErr] = useState("");
   const [usuarioSeleccionado, setUsuarioSeleccionado] = useState(null);
   const [modoModal, setModoModal] = useState("ver");
+  const [showDeleted, setShowDeleted] = useState(false);
 
   async function cargar() {
     setCargando(true);
     setErr("");
-    const { data, error } = await supabase.rpc("admin_list_app_users");
-    if (error) {
-      setErr(error.message || "No se pudo cargar usuarios");
-      setFilas([]);
-    } else {
+    try {
+      const { data, error } = await supabase.rpc("admin_list_app_users", {
+        term: q?.trim() || null,
+        include_deleted: showDeleted,
+        limit_count: 200,
+        offset_count: 0,
+      });
+      if (error) throw error;
       setFilas(data || []);
+    } catch (e) {
+      setErr(e.message || "No se pudo cargar usuarios");
+      setFilas([]);
+    } finally {
+      setCargando(false);
     }
-    setCargando(false);
   }
 
-  useEffect(() => { cargar(); }, []);
+  useEffect(() => { cargar(); /* eslint-disable-next-line */ }, [showDeleted]);
 
-  // Filtro por nombre/email/rol
   const filtradas = useMemo(() => {
     const term = q.trim().toLowerCase();
     if (!term) return filas;
     return filas.filter((u) =>
       (u.nombre || "").toLowerCase().includes(term) ||
       (u.email  || "").toLowerCase().includes(term) ||
-      (u.rol    || "").toLowerCase().includes(term)
+      (String(u.rol) || "").toLowerCase().includes(term)
     );
   }, [q, filas]);
 
-  
   const abrirCrearUsuario = () => {
     setModoModal("crear");
     setUsuarioSeleccionado({
       nombre: "", email: "", rol: "operador",
-      // campos extra para tu modal si los necesitas:
-      ci: "", especialidad: "", nivel: "", turno: "", estado: "Disponible", password: ""
+      estado: "disponible",
+      password: "",
+      // perfil
+      ci: "", telefono: "", direccion: "",
+      fecha_nacimiento: "", especialidad: "", nivel: "", turno: "",
+      matricula: "", institucion: "", fecha_graduacion: "",
+      disponibilidad: "Disponible",
+      avatar_url: null,
     });
   };
 
-  const abrirVerUsuario = (u) => {
+  const abrirVerUsuario = async (u) => {
+    const { data, error } = await supabase.rpc("admin_get_user_with_profile", { p_user_id: u.id });
+    if (error) return alert(error.message);
+    const app = data?.app_user || {};
+    const sp  = data?.staff_profile || {};
     setModoModal("ver");
-    setUsuarioSeleccionado(u);
+    setUsuarioSeleccionado({ ...app, ...sp });
+  };
+
+  const abrirEditarUsuario = async (u) => {
+    const { data, error } = await supabase.rpc("admin_get_user_with_profile", { p_user_id: u.id });
+    if (error) return alert(error.message);
+    const app = data?.app_user || {};
+    const sp  = data?.staff_profile || {};
+    setModoModal("editar");
+    setUsuarioSeleccionado({ ...app, ...sp });
+  };
+
+  const pedirConfirm = (title, message, onConfirm) =>
+    setConfirm({ open: true, title, message, onConfirm });
+  const [confirm, setConfirm] = useState({ open: false, title: "", message: "", onConfirm: null });
+  const cerrarConfirm = () => setConfirm({ open: false, title: "", message: "", onConfirm: null });
+
+  const onSoftDelete = (u) => {
+    pedirConfirm(
+      "Eliminar usuario",
+      `Esto desactivará a ${u.nombre} (soft-delete). ¿Confirmas?`,
+      async () => {
+        cerrarConfirm();
+        const { error } = await supabase.rpc("admin_soft_delete_user", { p_user_id: u.id });
+        if (error) alert(error.message);
+        await cargar();
+      }
+    );
+  };
+
+  const onRestore = (u) => {
+    pedirConfirm(
+      "Restaurar usuario",
+      `¿Restaurar a ${u.nombre}? Quedará “inactivo”.`,
+      async () => {
+        cerrarConfirm();
+        const { error } = await supabase.rpc("admin_restore_user", { p_user_id: u.id, restore_to: "inactivo" });
+        if (error) alert(error.message);
+        await cargar();
+      }
+    );
   };
 
   return (
@@ -70,6 +126,10 @@ export default function Usuarios() {
               onChange={(e) => setQ(e.target.value)}
               style={{ padding: "8px 10px", border: "1px solid #e5e7eb", borderRadius: 8 }}
             />
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+              <input type="checkbox" checked={showDeleted} onChange={(e) => setShowDeleted(e.target.checked)} />
+              Mostrar eliminados
+            </label>
             <button className="btn-primario" onClick={abrirCrearUsuario}>➕ Registrar usuario</button>
           </div>
         </div>
@@ -81,34 +141,44 @@ export default function Usuarios() {
                 <th>Nombre</th>
                 <th>Email</th>
                 <th>Rol</th>
+                <th>Estado</th>
                 <th>Creado</th>
+                <th style={{ width: 220 }}>Acciones</th>
               </tr>
             </thead>
 
             <tbody>
               {cargando && (
-                <tr><td colSpan={4} style={{ padding: 16 }}>Cargando…</td></tr>
+                <tr><td colSpan={6} style={{ padding: 16 }}>Cargando…</td></tr>
               )}
 
               {!cargando && err && (
-                <tr><td colSpan={4} style={{ padding: 16, color: "crimson" }}>{err}</td></tr>
+                <tr><td colSpan={6} style={{ padding: 16, color: "crimson" }}>{err}</td></tr>
               )}
 
               {!cargando && !err && filtradas.length === 0 && (
-                <tr><td colSpan={4} style={{ padding: 16 }}>Sin resultados</td></tr>
+                <tr><td colSpan={6} style={{ padding: 16 }}>Sin resultados</td></tr>
               )}
 
               {!cargando && !err && filtradas.map((u) => (
-                <tr key={u.id} onClick={() => abrirVerUsuario(u)} style={{ cursor: "pointer" }}>
+                <tr key={u.id}>
+                  <td onClick={() => abrirVerUsuario(u)} style={{ cursor: "pointer" }}>
+                    <div className="usuario-box"><span className="icon">👤</span><div>{u.nombre}</div></div>
+                  </td>
+                  <td onClick={() => abrirVerUsuario(u)} style={{ cursor: "pointer" }}>{u.email}</td>
+                  <td><RolePill rol={u.rol} /></td>
+                  <td><StatusPill estado={u.estado} /></td>
+                  <td>{new Date(u.creado_en).toLocaleDateString()}</td>
                   <td>
-                    <div className="usuario-box">
-                      <span className="icon">👤</span>
-                      <div>{u.nombre}</div>
+                    <div className="acciones" style={{ display: "flex", gap: 8 }}>
+                      <button className="btn-secundario" onClick={() => abrirEditarUsuario(u)}>Editar</button>
+                      {u.estado === "eliminado" ? (
+                        <button className="btn-secundario" onClick={() => onRestore(u)}>Restaurar</button>
+                      ) : (
+                        <button className="btn-peligro" onClick={() => onSoftDelete(u)}>Eliminar</button>
+                      )}
                     </div>
                   </td>
-                  <td>{u.email}</td>
-                  <td><RolePill rol={u.rol} /></td>
-                  <td>{new Date(u.creado_en).toLocaleDateString()}</td>
                 </tr>
               ))}
             </tbody>
@@ -118,30 +188,53 @@ export default function Usuarios() {
 
       {usuarioSeleccionado && (
         <ModalUsuario
-          modo={modoModal}
+          modo={modoModal}         // "crear" | "ver" | "editar"
           usuario={usuarioSeleccionado}
           onClose={() => setUsuarioSeleccionado(null)}
-          onCreated={cargar}    // refresca lista tras crear
+          onCreated={cargar}
           onUpdated={cargar}
         />
       )}
+
+      <ConfirmDialog
+        open={confirm.open}
+        title={confirm.title}
+        message={confirm.message}
+        onCancel={cerrarConfirm}
+        onConfirm={confirm.onConfirm || cerrarConfirm}
+      />
     </div>
   );
 }
 
 function RolePill({ rol }) {
   const map = {
-    administrador: ["#fee2e2", "#b91c1c", "#fecaca"], // bg, fg, border
+    administrador: ["#fee2e2", "#b91c1c", "#fecaca"],
+    encargado:     ["#e0f2fe", "#0369a1", "#bae6fd"],
     operador:      ["#dbeafe", "#1d4ed8", "#bfdbfe"],
-    asistente:     ["#e9d5ff", "#7c3aed", "#ddd6fe"],
+    secretario:    ["#e9d5ff", "#7c3aed", "#ddd6fe"],
   };
   const [bg, fg, bd] = map[rol] || ["#f1f5f9", "#64748b", "#e2e8f0"];
   return (
-    <span style={{
-      background: bg, color: fg, border: `1px solid ${bd}`,
-      fontSize: 12, padding: "2px 8px", borderRadius: 999
-    }}>
+    <span style={{ background: bg, color: fg, border: `1px solid ${bd}`, fontSize: 12, padding: "2px 8px", borderRadius: 999 }}>
       {rol ?? "Sin rol"}
+    </span>
+  );
+}
+
+function StatusPill({ estado }) {
+  const map = {
+    disponible: ["#dcfce7", "#166534", "#bbf7d0"],
+    ocupado:    ["#fef9c3", "#854d0e", "#fde68a"],
+    inactivo:   ["#e5e7eb", "#374151", "#d1d5db"],
+    bloqueado:  ["#fee2e2", "#991b1b", "#fecaca"],
+    suspendido: ["#ffe4e6", "#9f1239", "#fecdd3"],
+    eliminado:  ["#f3f4f6", "#6b7280", "#e5e7eb"],
+  };
+  const [bg, fg, bd] = map[estado] || ["#f1f5f9", "#64748b", "#e2e8f0"];
+  return (
+    <span style={{ background: bg, color: fg, border: `1px solid ${bd}`, fontSize: 12, padding: "2px 8px", borderRadius: 999, textTransform: "capitalize" }}>
+      {estado ?? "—"}
     </span>
   );
 }

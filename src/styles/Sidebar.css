@@ -216,3 +216,13 @@
 
 .user-card.as-button{ background:transparent; border:0; width:100%; text-align:left; padding:0; cursor:pointer; }
 .user-card.as-button:focus{ outline:2px solid #c7d2fe; outline-offset:2px; }
+
+/* Sidebar */
+.user-avatar-img {
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  object-fit: cover;
+  display: block;
+}
+

@@ -1,4 +1,3 @@
-// src/pages/Sidebar.jsx
 import {
   FaHome,
   FaSignOutAlt,
@@ -6,8 +5,8 @@ import {
   FaHistory,
   FaCog,
   FaUserCircle,
-  FaUsers,            // Pacientes
-  FaFileAlt,         // <-- NUEVO: Resultados
+  FaUsers,
+  FaFileAlt,
 } from "react-icons/fa";
 import "../styles/Sidebar.css";
 
@@ -35,7 +34,12 @@ export default function Sidebar() {
 
       const { data, error } = await supabase
         .from("app_users")
-        .select("nombre, rol, email")
+        .select(`
+          nombre,
+          rol,
+          email,
+          staff_profiles ( avatar_url )
+        `)
         .eq("id", user.id)
         .maybeSingle();
 
@@ -46,8 +50,12 @@ export default function Sidebar() {
         user.user_metadata?.name ||
         (user.email ? user.email.split("@")[0] : "Usuario");
 
+      const avatar_url = data?.staff_profiles?.avatar_url ?? null;
+
       setProfile(
-        data ? { ...data } : { nombre: fallbackName, email: user.email, rol: null }
+        data
+          ? { ...data, avatar_url }
+          : { nombre: fallbackName, email: user.email, rol: null, avatar_url: null }
       );
     }
 
@@ -129,7 +137,6 @@ export default function Sidebar() {
               </li>
             </NavLink>
 
-            {/* NUEVO: Resultados (lista de informes) */}
             <NavLink to="/resultados">
               <li>
                 <FaFileAlt /> Resultados
@@ -170,7 +177,11 @@ export default function Sidebar() {
         >
           <div className="user-left">
             <div className="user-avatar">
-              <FaUserCircle />
+              {profile?.avatar_url ? (
+                <img src={profile.avatar_url} alt="avatar" className="user-avatar-img" />
+              ) : (
+                <FaUserCircle />
+              )}
             </div>
             <div className="user-meta">
               <div className="user-name" title={profile?.email || ""}>
@@ -182,7 +193,6 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* Modal Perfil */}
       <ModalPerfil
         open={openPerfil}
         onClose={() => setOpenPerfil(false)}

@@ -1,94 +1,150 @@
+// src/pages/System.jsx
 import "../styles/System.css";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../lib/supabaseClient";
 
 export default function System() {
-  // ---------------- Configuración / Notificaciones ----------------
-  const [emails, setEmails] = useState([
-    "receptor@gmail.com",
-    "receptor@gmail.com",
-  ]);
+  // ---------------- Estado principal ----------------
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const [ok, setOk] = useState("");
+
+  // system row
+  const [institucion, setInstitucion] = useState("");
+  const [zona, setZona] = useState("");
+  const [idioma, setIdioma] = useState("");
+  const [formato, setFormato] = useState("");
+  const [version, setVersion] = useState("");
+  const [estado, setEstado] = useState("ok");
+  const [ultimaAct, setUltimaAct] = useState(null);
+  const [ultimoBackup, setUltimoBackup] = useState(null);
+  const [backupTarget, setBackupTarget] = useState("");
+
+  // notificaciones (JS puro, sin tipos)
+  const [emails, setEmails] = useState([]);
   const [nuevoEmail, setNuevoEmail] = useState("");
-  const [notificar, setNotificar] = useState(true);
+  const [notificar, setNotificar] = useState(false);
   const [urgente, setUrgente] = useState(false);
 
+  // ---------- cargar configuración ----------
+  async function loadSystem() {
+    try {
+      setLoading(true);
+      setErr(""); setOk("");
+      const { data, error } = await supabase.rpc("admin_get_system");
+      if (error) throw error;
+
+      setInstitucion(data?.institucion || "");
+      setZona(data?.zona_horaria || "");
+      setIdioma(data?.idioma || "");
+      setFormato(data?.formato_fecha || "");
+      setVersion(data?.version || "");
+      setEstado(data?.estado || "ok");
+      setUltimaAct(data?.ultima_actualizacion || data?.updated_at || null);
+      setUltimoBackup(data?.ultimo_backup_at || null);
+      setBackupTarget(data?.backup_target || "");
+
+      setNotificar(!!data?.notificar);
+      setUrgente(!!data?.notificar_urgente);
+      setEmails(Array.isArray(data?.emails) ? data.emails : []);
+    } catch (e) {
+      setErr(e.message || "No se pudo cargar la configuración");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { loadSystem(); }, []);
+
+  // --------- acciones: emails ---------
   const agregarEmail = () => {
     const v = nuevoEmail.trim();
     if (!v) return;
     if (!emails.includes(v)) setEmails((prev) => [...prev, v]);
     setNuevoEmail("");
   };
-
-  const eliminarEmail = (index) => {
-    setEmails((prev) => prev.filter((_, i) => i !== index));
+  const eliminarEmail = (i) => {
+    setEmails((prev) => prev.filter((_, idx) => idx !== i));
   };
 
-  const handleGuardarBackup = () => {
-    // aquí luego puedes llamar a tu endpoint/función real
-    alert("✅ Copia de seguridad guardada exitosamente");
-  };
+  // --------- guardar configuración ---------
+  async function guardarConfig() {
+    try {
+      setSaving(true);
+      setErr(""); setOk("");
+
+      const patch = {
+        institucion,
+        zona_horaria: zona,
+        idioma,
+        formato_fecha: formato,
+        version,
+        estado,
+        backup_target: backupTarget,
+        notificar,
+        emails,
+        notificar_urgente: urgente,
+      };
+
+      const { data, error } = await supabase.rpc("admin_update_system", { p_patch: patch });
+      if (error) throw error;
+
+      setOk("✅ Configuración guardada");
+      setUltimaAct(data?.ultima_actualizacion || data?.updated_at || null);
+    } catch (e) {
+      setErr(e.message || "No se pudo guardar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // --------- backup manual ---------
+  async function handleGuardarBackup() {
+    try {
+      setSaving(true);
+      setErr(""); setOk("");
+      const { error } = await supabase.rpc("admin_trigger_backup", { p_target: backupTarget || "default" });
+      if (error) throw error;
+      setOk("🗄️ Backup realizado");
+      await loadSystem();
+    } catch (e) {
+      setErr(e.message || "No se pudo realizar el backup");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   // ---------------------- Eventos (logs) --------------------------
-  // Simulación de datos. Luego puedes reemplazar por la data real de Supabase.
   const [levelFilter, setLevelFilter] = useState("all"); // all | info | warn | error
   const [query, setQuery] = useState("");
+  const [events, setEvents] = useState([]);
+  const [evLoading, setEvLoading] = useState(false);
 
-  const [events] = useState(() => [
-    {
-      id: "e-001",
-      ts: "2026-05-20 15:42",
-      usuario: "admin@gmail.com",
-      nivel: "info",
-      accion: "LOGIN_OK",
-      detalle: "Inicio de sesión exitoso",
-    },
-    {
-      id: "e-002",
-      ts: "2026-05-20 15:45",
-      usuario: "admin@gmail.com",
-      nivel: "info",
-      accion: "CONFIG_UPDATE",
-      detalle: "Cambió zona horaria a UTC-04:00",
-    },
-    {
-      id: "e-003",
-      ts: "2026-05-20 16:02",
-      usuario: "operador@acme.com",
-      nivel: "warn",
-      accion: "UPLOAD_SKIP",
-      detalle: "Archivo duplicado omitido",
-    },
-    {
-      id: "e-004",
-      ts: "2026-05-20 16:11",
-      usuario: "admin@gmail.com",
-      nivel: "error",
-      accion: "BACKUP_FAIL",
-      detalle: "No se pudo escribir en el bucket",
-    },
-    {
-      id: "e-005",
-      ts: "2026-05-20 16:18",
-      usuario: "admin@gmail.com",
-      nivel: "info",
-      accion: "BACKUP_OK",
-      detalle: "Copia de seguridad completada",
-    },
-  ]);
+  async function loadEvents() {
+    try {
+      setEvLoading(true);
+      const p_level = levelFilter === "all" ? null : levelFilter;
+      const { data, error } = await supabase.rpc("admin_list_logs", {
+        p_q: query || null,
+        p_level,
+        p_limit: 100,
+        p_offset: 0,
+      });
+      if (error) throw error;
+      setEvents(data || []);
+    } catch {
+      // ignorar
+    } finally {
+      setEvLoading(false);
+    }
+  }
 
-  const filteredEvents = useMemo(() => {
-    const q = query.toLowerCase();
-    return events.filter((e) => {
-      const matchLevel = levelFilter === "all" ? true : e.nivel === levelFilter;
-      const matchQuery =
-        !q ||
-        e.usuario.toLowerCase().includes(q) ||
-        e.accion.toLowerCase().includes(q) ||
-        e.detalle.toLowerCase().includes(q) ||
-        e.ts.toLowerCase().includes(q);
-      return matchLevel && matchQuery;
-    });
-  }, [events, levelFilter, query]);
+  useEffect(() => { loadEvents(); }, [levelFilter, query]);
 
+  const filteredEvents = useMemo(() => events, [events]);
+
+  // ---------------------------- UI ----------------------------
   return (
     <div className="sistema-container">
       {/* Columna izquierda ------------------------------------------------ */}
@@ -96,26 +152,37 @@ export default function System() {
         <div className="card config">
           <h3>⚙️ Configuración del Sistema</h3>
 
+          {err && <div className="alert alert--error">{err}</div>}
+          {ok  && <div className="alert alert--ok">{ok}</div>}
+
           <label>Nombre de la Institución</label>
-          <input defaultValue="IITCUP" />
+          <input value={institucion} onChange={e=>setInstitucion(e.target.value)} disabled={loading||saving} />
 
           <label>Zona Horaria</label>
-          <select defaultValue="UTC-04:00 Bolivia">
-            <option>UTC-04:00 Bolivia</option>
-            <option>UTC-03:00 Argentina</option>
+          <select value={zona} onChange={e=>setZona(e.target.value)} disabled={loading||saving}>
+            <option value="UTC-04:00 Bolivia">UTC-04:00 Bolivia</option>
+            <option value="UTC-03:00 Argentina">UTC-03:00 Argentina</option>
+            <option value="UTC-05:00 Colombia/Perú">UTC-05:00 Colombia/Perú</option>
           </select>
 
           <label>Idioma</label>
-          <select defaultValue="Español">
+          <select value={idioma} onChange={e=>setIdioma(e.target.value)} disabled={loading||saving}>
             <option>Español</option>
-            <option>Real Brasilero (RS)</option>
+            <option>Português</option>
           </select>
 
           <label>Formato de Fecha</label>
-          <select defaultValue="DD/MM/YYYY">
+          <select value={formato} onChange={e=>setFormato(e.target.value)} disabled={loading||saving}>
             <option>DD/MM/YYYY</option>
             <option>MM/DD/YYYY</option>
+            <option>YYYY-MM-DD</option>
           </select>
+
+          <div style={{marginTop:12, display:'flex', gap:8}}>
+            <button className="btn-primary" onClick={guardarConfig} disabled={loading||saving}>
+              {saving ? "Guardando…" : "Guardar configuración"}
+            </button>
+          </div>
         </div>
 
         <div className="card notificaciones">
@@ -123,11 +190,7 @@ export default function System() {
 
           <div className="toggle">
             <span>Notificar</span>
-            <input
-              type="checkbox"
-              checked={notificar}
-              onChange={() => setNotificar((v) => !v)}
-            />
+            <input type="checkbox" checked={notificar} onChange={()=>setNotificar(v=>!v)} disabled={saving}/>
           </div>
 
           <div className="email-add">
@@ -136,26 +199,23 @@ export default function System() {
               value={nuevoEmail}
               onChange={(e) => setNuevoEmail(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && agregarEmail()}
+              disabled={saving}
             />
-            <button onClick={agregarEmail}>+</button>
+            <button onClick={agregarEmail} disabled={saving}>+</button>
           </div>
 
           <ul className="email-lista">
             {emails.map((email, index) => (
               <li key={email + index}>
                 {email}
-                <button onClick={() => eliminarEmail(index)}>x</button>
+                <button onClick={() => eliminarEmail(index)} disabled={saving}>x</button>
               </li>
             ))}
           </ul>
 
           <div className="toggle urgente">
             <span>Notificar Asunto Urgente</span>
-            <input
-              type="checkbox"
-              checked={urgente}
-              onChange={() => setUrgente((v) => !v)}
-            />
+            <input type="checkbox" checked={urgente} onChange={()=>setUrgente(v=>!v)} disabled={saving}/>
           </div>
         </div>
       </section>
@@ -166,23 +226,30 @@ export default function System() {
           <h3>🧾 Información del Sistema</h3>
 
           <label>Versión</label>
-          <input value="v1.0.0" disabled />
+          <input value={version} onChange={e=>setVersion(e.target.value)} disabled={saving}/>
 
           <label>Última Actualización</label>
-          <input value="29/04/2025" disabled />
+          <input value={ultimaAct ? new Date(ultimaAct).toLocaleString() : "—"} disabled />
 
           <label>Estado</label>
-          <p className="estado verde">🟢 Sistema Actualizado</p>
+          <select value={estado} onChange={e=>setEstado(e.target.value)} disabled={saving}>
+            <option value="ok">SISTEMA ACTUALIZADO</option>
+            <option value="warn">ADVERTENCIAS</option>
+            <option value="error">ERROR</option>
+          </select>
 
           <label>Último Backup</label>
-          <input value="20/05/2026 15:30" disabled />
+          <input value={ultimoBackup ? new Date(ultimoBackup).toLocaleString() : "—"} disabled />
 
-          <button className="btn-backup" onClick={handleGuardarBackup}>
+          <label>Destino de Backup</label>
+          <input value={backupTarget} onChange={e=>setBackupTarget(e.target.value)} disabled={saving}/>
+
+          <button className="btn-backup" onClick={handleGuardarBackup} disabled={saving}>
             🔒 Realizar Copia de Seguridad
           </button>
         </div>
 
-        {/* ---------- NUEVO PANEL: EVENTOS DEL SISTEMA ----------- */}
+        {/* ---------- EVENTOS DEL SISTEMA ----------- */}
         <div className="card eventos">
           <div className="eventos-head">
             <h3>🗂️ Eventos del Sistema</h3>
@@ -217,17 +284,16 @@ export default function System() {
             </div>
 
             <ul className="eventos-tbody">
-              {filteredEvents.length === 0 && (
+              {evLoading && <li className="eventos-empty">Cargando…</li>}
+              {!evLoading && filteredEvents.length === 0 && (
                 <li className="eventos-empty">Sin resultados</li>
               )}
 
-              {filteredEvents.map((e) => (
+              {!evLoading && filteredEvents.map((e) => (
                 <li key={e.id} className="eventos-row">
-                  <span className="mono">{e.ts}</span>
+                  <span className="mono">{new Date(e.ts).toLocaleString()}</span>
                   <span className="cut">{e.usuario}</span>
-                  <span>
-                    <span className={`chip ${e.nivel}`}>{e.nivel}</span>
-                  </span>
+                  <span><span className={`chip ${e.nivel}`}>{e.nivel}</span></span>
                   <span className="mono cut">{e.accion}</span>
                   <span className="cut">{e.detalle}</span>
                 </li>

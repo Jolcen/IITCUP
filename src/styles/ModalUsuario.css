@@ -5,15 +5,15 @@
   --ok-700: #16a34a;
   --danger: #ef4444;
   --danger-700: #dc2626;
-  --ink: #0f172a;            /* texto principal */
-  --muted: #64748b;          /* texto secundario */
-  --line: #e2e8f0;           /* bordes */
-  --surface: #ffffff;        /* panel */
-  --surface-2: #f8fafc;      /* rellenos */
+  --ink: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
   --focus: #60a5fa;
 }
 
-/* ===== Overlay + animación ===== */
+/* ===== Overlay ===== */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -21,21 +21,21 @@
   backdrop-filter: blur(2px);
   display: grid;
   place-items: center;
-  padding: 16px;
+  padding: 12px;
   z-index: 999;
   animation: overlayIn .18s ease-out both;
 }
 @keyframes overlayIn { from { opacity: 0 } to { opacity: 1 } }
 
-/* ===== Contenedor del modal ===== */
+/* ===== Contenedor del modal (más bajo y angosto) ===== */
 .modal-usuario {
   background: var(--surface);
   color: var(--ink);
-  width: min(860px, 100%);
-  border-radius: 16px;
-  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.2);
+  width: min(760px, 96vw);          /* ↓ de 860 a 760 */
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.20);
   border: 1px solid var(--line);
-  overflow: clip;
+  overflow: hidden;                 /* sin scroll interno */
   animation: cardIn .22s ease-out both;
 }
 @keyframes cardIn {
@@ -44,165 +44,144 @@
 }
 
 /* ===== Header ===== */
-.modal-usuario h3 {
-  margin: 0;
-  font-weight: 700;
-  font-size: 20px;
-}
 .modal-header {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 20px 24px 8px 24px;
+  gap: 10px;
+  padding: 12px 16px 6px 16px;      /* ↓ padding */
+}
+.modal-usuario h3 {
+  margin: 0;
+  font-weight: 700;
+  font-size: 18px;                  /* ↓ tamaño */
 }
 .modal-subtitle {
-  margin: 0 24px 14px 24px;
+  margin: 0 16px 10px 16px;         /* ↓ separación */
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;                  /* ↓ tamaño */
 }
 
-/* Cabecera con avatar (tu bloque existente) */
+/* ===== Cabecera con avatar ===== */
 .usuario-header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 24px 12px 24px;
+  gap: 12px;                        /* ↓ espacio */
+  padding: 0 16px 8px 16px;         /* ↓ padding */
 }
 .usuario-header img {
-  width: 64px;
-  height: 64px;
+  width: 56px;                      /* ↓ de 64 a 56 */
+  height: 56px;
   border-radius: 50%;
   object-fit: cover;
-  border: 2px solid var(--line);
+  border: 1px solid var(--line);
 }
-.usuario-header strong { display: block; font-size: 16px; }
-.usuario-header div > div { color: var(--muted); font-size: 13px; }
+.usuario-header strong { display: block; font-size: 15px; }
+.usuario-header div > div { color: var(--muted); font-size: 12px; }
 
-/* ===== Cuerpo / formulario ===== */
+/* ===== Formulario compacto en 2 columnas ===== */
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 18px 24px;
-  padding: 8px 24px 0 24px;
+  gap: 12px 16px;                   /* ↓ gaps */
+  padding: 4px 16px 0 16px;         /* ↓ padding */
 }
 .col { display: grid; grid-template-columns: 1fr; }
 
 .col label {
   font-weight: 600;
-  font-size: 13px;
-  margin-top: 12px;
+  font-size: 12px;                  /* ↓ tamaño */
+  margin-top: 6px;                  /* ↓ margen */
   color: var(--ink);
 }
 
+/* Inputs compactos */
 .col input,
 .col select {
   width: 100%;
-  margin-top: 6px;
-  padding: 10px 12px;
-  font-size: 14px;
+  margin-top: 4px;                  /* ↓ margen */
+  padding: 8px 10px;                /* ↓ padding */
+  font-size: 13px;                  /* ↓ tamaño */
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;               /* ↓ radio */
   background: var(--surface-2);
   transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
 }
-
 .col input::placeholder { color: #94a3b8; }
 
 .col input:focus,
 .col select:focus {
   outline: none;
   border-color: var(--focus);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 20%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 18%, transparent);
   background: #fff;
 }
 
 .col input:disabled,
 .col select:disabled {
-  opacity: .75;
+  opacity: .8;
   cursor: not-allowed;
   background: #f1f5f9;
 }
 
-/* Inline input + botón (toggle ver/ocultar) */
-.col .input-inline {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
+/* Botón secundario (ej. “Seleccionar foto”) */
 .btn-secundario {
-  height: 38px;
+  height: 34px;                     /* ↓ altura */
   padding: 0 10px;
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid var(--line);
   background: #fff;
   color: var(--ink);
   font-weight: 600;
+  font-size: 13px;
   cursor: pointer;
-  transition: background .15s ease, border-color .15s ease, transform .05s;
+  transition: background .15s, border-color .15s, transform .05s;
 }
 .btn-secundario:hover { background: #f8fafc; }
 .btn-secundario:active { transform: translateY(1px); }
 .btn-secundario:disabled { opacity: .7; cursor: not-allowed; }
 
-/* ===== Mensajes ===== */
+/* Mensajes */
 .alert {
-  margin: 10px 24px 0 24px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  font-size: 13px;
+  margin: 8px 16px 0 16px;          /* ↓ márgenes */
+  padding: 8px 10px;                /* ↓ padding */
+  border-radius: 8px;
+  font-size: 12px;
   border: 1px solid;
 }
 .alert--error  { color: var(--danger-700);  border-color: var(--danger);  background: #fee2e2; }
 .alert--ok     { color: var(--ok-700);      border-color: var(--ok);      background: #dcfce7; }
 
-/* ===== Footer / acciones ===== */
+/* Footer */
 .modal-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  padding: 18px 24px 22px 24px;
+  gap: 8px;
+  padding: 12px 16px 14px 16px;     /* ↓ padding */
   border-top: 1px solid var(--line);
   background: #fff;
 }
-
 .btn {
   appearance: none;
   border: none;
-  border-radius: 10px;
-  padding: 10px 16px;
+  border-radius: 8px;               /* ↓ radio */
+  padding: 8px 14px;                /* ↓ padding */
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;                  /* ↓ tamaño */
   cursor: pointer;
-  transition: transform .05s, filter .15s ease, background .15s ease;
+  transition: transform .05s, filter .15s, background .15s;
 }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .6; cursor: not-allowed; }
-
-.btn-aceptar {
-  background: var(--ok);
-  color: #fff;
-}
+.btn-aceptar { background: var(--ok); color: #fff; }
 .btn-aceptar:hover { filter: brightness(0.96); }
-.btn-aceptar:disabled { background: color-mix(in srgb, var(--ok) 70%, #999); }
-
-.btn-rechazar {
-  background: var(--danger);
-  color: #fff;
-}
+.btn-rechazar { background: var(--danger); color: #fff; }
 .btn-rechazar:hover { filter: brightness(0.96); }
-.btn-rechazar:disabled { background: color-mix(in srgb, var(--danger) 70%, #999); }
+.btn-neutral { background: #e5e7eb; color: #111827; }
 
-/* Variante “neutra” si la necesitas */
-.btn-neutral {
-  background: #e5e7eb;
-  color: #111827;
-}
-
-/* ===== Close (opcional si agregas una X) ===== */
+/* Botón cerrar */
 .modal-close {
   margin-left: auto;
-  width: 36px;
-  height: 36px;
+  width: 32px; height: 32px;        /* ↓ tamaño */
   border-radius: 8px;
   background: transparent;
   border: 1px solid var(--line);
@@ -214,11 +193,134 @@
 
 /* ===== Responsive ===== */
 @media (max-width: 860px) {
-  .modal-usuario { width: 100%; }
+  .modal-usuario { width: 96vw; }
 }
 @media (max-width: 720px) {
   .form-grid { grid-template-columns: 1fr; }
-  .usuario-header { padding-right: 16px; padding-left: 16px; }
-  .modal-header, .modal-subtitle { padding-left: 16px; padding-right: 16px; }
-  .modal-actions { padding-left: 16px; padding-right: 16px; }
+  .modal-header, .modal-subtitle, .usuario-header, .modal-actions { padding-left: 12px; padding-right: 12px; }
 }
+
+.section-title{
+  margin-top: 6px;
+  margin-bottom: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #111827;
+  opacity: .9;
+}
+
+.field-err{
+  color: #c0392b;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* ===== Secciones visuales ===== */
+.sections-grid{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  padding: 4px 16px 0 16px;
+}
+.section-card{
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+}
+.section-heading{
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+}
+
+/* Reutilizamos la malla de campos dentro de cada card */
+.section-card .form-grid{
+  padding: 0;
+}
+
+/* CI: número + extensión alineados */
+.ci-row{
+  display: grid;
+  grid-template-columns: 1fr 140px;
+  gap: 8px;
+}
+.ci-ext{
+  min-width: 120px;
+}
+
+/* Errores debajo del campo */
+.field-err{
+  color: #c0392b;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* Responsive */
+@media (max-width: 900px){
+  .sections-grid{ grid-template-columns: 1fr; }
+}
+
+/* CI: que el campo número sea claramente más ancho */
+.ci-row{
+  display: grid;
+  grid-template-columns: 1.6fr 0.8fr; /* antes 1fr 140px */
+  gap: 8px;
+}
+.ci-row input{
+  min-width: 0;             /* evita recorte en grids */
+  color: var(--ink);         /* asegura contraste */
+}
+.ci-ext{
+  min-width: 128px;
+}
+
+.section-card{
+  background: #f9fafb;     /* un pelín más claro */
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px;
+}
+.section-heading{
+  margin: 0 0 8px 0;
+  font-weight: 700;
+  font-size: 13px;
+  color: #111827;
+  letter-spacing: .2px;
+}
+
+/* Tarjetas/secciones */
+.section-card {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin: 12px 16px;
+}
+.section-heading {
+  margin: 0 0 8px 0;
+  font-weight: 700;
+  font-size: 13px;
+  color: #111827;
+}
+
+/* CI fila especial */
+.ci-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ci-row input {
+  flex: 1;                /* ocupa todo el espacio disponible */
+  min-width: 150px;       /* asegura que no quede tan corto */
+}
+
+.ci-ext {
+  width: 80px;            /* tamaño fijo compacto para el selector */
+}
+
+.ci-row { display: flex; gap: 8px; align-items: center; }
+.ci-row input { flex: 1; min-width: 180px; }
+.ci-ext { width: 80px; }

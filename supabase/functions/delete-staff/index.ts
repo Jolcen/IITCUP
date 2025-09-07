@@ -9,7 +9,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // Preflight CORS
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -17,52 +16,45 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const admin = createClient(supabaseUrl, serviceKey);
+    const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-    // Cliente con el JWT del usuario que invoca (desde tu web)
-    const jwt = req.headers.get("Authorization")?.replace("Bearer ", "") ?? "";
-    const authed = createClient(supabaseUrl, jwt);
+    const jwt = req.headers.get("Authorization")?.replace("Bearer ", "")?.trim();
+    if (!jwt) return new Response(JSON.stringify({ error: "Falta Authorization" }), { status: 401, headers: corsHeaders });
 
-    const me = await authed.auth.getUser();
-    const meId = me.data.user?.id ?? null;
-    if (!meId) {
-      return new Response(JSON.stringify({ error: "No session" }), { status: 401, headers: corsHeaders });
+    const { data: authUserData, error: getUserErr } = await admin.auth.getUser(jwt);
+    if (getUserErr || !authUserData?.user?.id) {
+      return new Response(JSON.stringify({ error: "No session", detail: getUserErr?.message }), { status: 401, headers: corsHeaders });
     }
+    const meId = authUserData.user.id;
 
-    // Verificación de rol administrador
-    const { data: meRow } = await authed.from("app_users").select("rol").eq("id", meId).single();
+    // Verificar rol admin
+    const { data: meRow, error: meErr } = await admin.from("app_users").select("rol").eq("id", meId).single();
+    if (meErr) return new Response(JSON.stringify({ error: "No se pudo verificar rol", detail: meErr.message }), { status: 400, headers: corsHeaders });
     if (meRow?.rol !== "administrador") {
       return new Response(JSON.stringify({ error: "Solo administrador" }), { status: 403, headers: corsHeaders });
     }
 
-    // Body
     const { targetId } = await req.json();
-    if (!targetId) {
-      return new Response(JSON.stringify({ error: "targetId requerido" }), { status: 400, headers: corsHeaders });
-    }
+    if (!targetId) return new Response(JSON.stringify({ error: "targetId requerido" }), { status: 400, headers: corsHeaders });
 
     // No permitir borrar administradores
     const { data: target, error: eGet } = await admin.from("app_users").select("rol").eq("id", targetId).single();
-    if (eGet) {
-      return new Response(JSON.stringify({ error: "No se pudo obtener el usuario objetivo", detail: eGet.message }), { status: 400, headers: corsHeaders });
-    }
-    if (!target) {
-      return new Response(JSON.stringify({ error: "Usuario no existe" }), { status: 404, headers: corsHeaders });
-    }
+    if (eGet) return new Response(JSON.stringify({ error: "No se pudo obtener el usuario objetivo", detail: eGet.message }), { status: 400, headers: corsHeaders });
+    if (!target) return new Response(JSON.stringify({ error: "Usuario no existe" }), { status: 404, headers: corsHeaders });
     if (target.rol === "administrador") {
       return new Response(JSON.stringify({ error: "No se puede eliminar a un administrador" }), { status: 400, headers: corsHeaders });
     }
 
     // 1) Borrar fila app_users
     const { error: eDelRow } = await admin.from("app_users").delete().eq("id", targetId);
-    if (eDelRow) {
-      return new Response(JSON.stringify({ error: "No se pudo eliminar de app_users", detail: eDelRow.message }), { status: 400, headers: corsHeaders });
-    }
+    if (eDelRow) return new Response(JSON.stringify({ error: "No se pudo eliminar de app_users", detail: eDelRow.message }), { status: 400, headers: corsHeaders });
 
-    // 2) Borrar usuario en Auth
+    // 2) Borrar perfil
+    await admin.from("staff_profiles").delete().eq("id", targetId);
+
+    // 3) Borrar usuario en Auth
     const { error: eDelAuth } = await admin.auth.admin.deleteUser(targetId);
     if (eDelAuth) {
-      // si por alguna razón falla Auth, deja constancia en log
       await admin.from("logs").insert({
         usuario_id: meId,
         accion: "DELETE",
@@ -77,7 +69,7 @@ serve(async (req) => {
       });
     }
 
-    // 3) Log
+    // 4) Log
     const ip = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "";
     const ua = req.headers.get("user-agent") || "";
     await admin.from("logs").insert({

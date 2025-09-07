@@ -1,4 +1,3 @@
-// src/components/ModalPerfil.jsx
 import { useEffect } from "react";
 import { FaUserCircle, FaSignOutAlt, FaTimes } from "react-icons/fa";
 import "../styles/ModalPerfil.css";
@@ -18,7 +17,11 @@ export default function ModalPerfil({ open, onClose, profile, roleLabel, onLogou
       <div className="mp-modal" onClick={(e) => e.stopPropagation()}>
         <div className="mp-header">
           <div className="mp-title">
-            <FaUserCircle className="mp-avatar" />
+            {profile?.avatar_url ? (
+              <img src={profile.avatar_url} alt="avatar" className="mp-avatar-img" />
+            ) : (
+              <FaUserCircle className="mp-avatar" />
+            )}
             <div>
               <h3 className="mp-name">{profile?.nombre ?? "Usuario"}</h3>
               <p className="mp-role">{roleLabel}</p>

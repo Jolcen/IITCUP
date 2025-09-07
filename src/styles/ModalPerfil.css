@@ -52,3 +52,12 @@
   padding: 10px 14px; cursor: pointer; font-weight: 700;
 }
 .mp-logout:hover { filter: brightness(0.95); }
+
+/* ModalPerfil */
+.mp-avatar-img {
+  width: 56px;
+  height: 56px;
+  border-radius: 9999px;
+  object-fit: cover;
+  margin-right: 12px;
+}
