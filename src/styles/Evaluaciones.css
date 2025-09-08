@@ -1,10 +1,10 @@
-
+/* ----- Evaluaciones.css (completo) ----- */
 :root { --topbar-h: 64px; }
 
 /* ----- Layout de página ----- */
 .evaluaciones-page{
-  height: calc(95vh - var(--topbar-h));   /* ocupa exactamente el alto disponible */
-  overflow: hidden;                        /* sin scroll en la página */
+  height: calc(95vh - var(--topbar-h));
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -21,61 +21,45 @@
   align-items: center;
   margin-bottom: 12px;
 }
-.header h2{ margin: 0; }
 .header p{ margin: 4px 0 0; color: #64748b; }
 
 /* Acciones (buscador, filtro, botón) */
-.actions-right{
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
+.actions-right{ display: flex; gap: 10px; align-items: center; }
 
 .searchbox{
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: flex; align-items: center; gap: 8px;
   background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
+  border: 1px solid #e5e7eb; border-radius: 10px;
   padding: 8px 12px;
 }
 .searchbox input{
-  border: none;
-  outline: none;
-  font-size: 14px;
-  width: 220px;
+  border: none; outline: none; font-size: 14px; width: 220px;
 }
 .filtro{
   background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
+  border: 1px solid #e5e7eb; border-radius: 10px;
   padding: 8px 10px;
 }
 
 /* Botón principal */
 .btn-add{
   background-color: var(--primary-color, #2563eb);
-  color: #fff;
-  padding: 10px 14px;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 600;
+  color: #fff; padding: 10px 14px; border: none; border-radius: 10px;
+  cursor: pointer; font-weight: 600;
   box-shadow: 0 3px 12px rgba(0,0,0,0.06);
 }
 
 /* ----- Contenedor principal de la tabla ----- */
 .table-container{
-  flex: 1 1 auto;      /* ocupa todo el alto restante */
-  min-height: 0;       /* importante para que no fuerce scroll */
+  flex: 1 1 auto;
+  min-height: 0;
   background: #fff;
   border-radius: 14px;
   padding: 14px 16px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
 
   display: flex;
-  flex-direction: column;   /* tabla arriba, paginación abajo */
+  flex-direction: column;
   gap: 8px;
 }
 
@@ -84,141 +68,120 @@ table{
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
-  table-layout: fixed;  /* evita scroll horizontal */
-  flex: 1 1 auto;       /* se estira en alto */
-  min-height: 0;
+  table-layout: fixed;
+  flex: 0 0 auto; /* no estires la tabla en alto */
 }
 
+/* Encabezados */
 thead th{
-  background: #f1f5f9;
+  background: #eef2f7;
   color: #334155;
-  font-weight: 700;
-  padding: 12px;
+  font-weight: 800;
+  padding: 10px;
   border-radius: 8px;
 }
 
+/* Celdas */
 tbody td{
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-bottom: 1px dashed #eef2f7;
   vertical-align: middle;
 }
-
 tbody tr:hover{ background: #fafbff; }
+.table-container tbody tr{ height: auto; } /* sin altura forzada */
 
-/* Altura de fila pensada para PAGE_SIZE=8 en 1080p */
-.table-container tbody tr{ height: 64px; }
+.col-individuo{ width: 20%; }             
+.col-ci       { width: 12%; text-align: center; }
+.col-detalles { width: 34%; }            
+.col-fecha    { width: 12%; text-align: center; }
+.col-estado   { width: 8%;  text-align: center; }
+.col-acciones { width: 14%; text-align: right; min-width: 260px; white-space: normal; } 
 
-/* Columnas con cortes elegantes */
-.col-individuo, .col-detalles{
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.col-detalles{ color: #475569; }
-.col-ci, .col-fecha{ color: #475569; }
 
-/* Avatar + nombre */
-.avatar{
-  font-size: 22px;
-  color: #475569;
-  margin-right: 8px;
-}
+/* -------- Contenido columna INDIVIDUO -------- */
 .col-individuo{
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
 }
-.nombre{ font-weight: 700; color: #111827; }
+.avatar{ flex: 0 0 28px; font-size: 28px; color: #475569; margin-right: 8px; } /* compacto */
+.name{ flex: 1 1 auto; min-width: 0; }      /* clave p/que flex no recorte */
+.nombre{
+  font-weight: 700; color: #111827;
+  white-space: normal; overflow-wrap: break-word; word-break: normal;
+}
+.name .sub{ color:#64748b; font-size:12px; font-weight:600; margin-top:2px; }
+
+
+/* -------- Columnas con cuts elegantes -------- */
+.col-detalles{ color: #475569; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-ci, .col-fecha{ color: #475569; }
 
 /* Chips de estado */
 .chip{
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  display: inline-block;
-  white-space: nowrap;
+  padding: 6px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; display: inline-block; white-space: nowrap;
 }
-.chip-pendiente{ background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }
-.chip-en_evaluacion{ background: #ecfeff; color: #155e75; border: 1px solid #67e8f9; }
-.chip-evaluado{ background: #ecfdf5; color: #166534; border: 1px solid #86efac; }
+.chip-pendiente   { background:#fff7ed; color:#9a3412; border:1px solid #fdba74; }
+.chip-asignado    { background:#eef2ff; color:#3730a3; border:1px solid #c7d2fe; }
+.chip-en_progreso { background:#ecfeff; color:#155e75; border:1px solid #67e8f9; }
+.chip-completada  { background:#ecfdf5; color:#166534; border:1px solid #86efac; }
+.chip-cancelado   { background:#fef2f2; color:#991b1b; border:1px solid #fecaca; }
 
 /* Acciones por fila */
-.col-acciones{
-  text-align: right;
-  white-space: nowrap;
-}
 .col-acciones .actions-wrap{
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display:inline-flex; align-items:center; gap:8px;
+  flex-wrap:wrap; justify-content:flex-end; max-width:100%;
 }
-
 .btn{
   appearance: none;
   border: 1px solid #e5e7eb;
-  background: #fff;
-  color: #0f172a;
-  padding: 6px 10px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  background: #fff; color: #0f172a;
+  padding: 4px 8px; border-radius: 10px;
+  cursor: pointer; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 6px;
   box-shadow: 0 2px 6px rgba(0,0,0,0.05);
 }
 .btn-sm{ font-size: 12px; }
-.btn svg{ font-size: 13px; }
-
 .btn-primary{ background: #2563eb; border-color: #2563eb; color: #fff; }
 .btn-light{ background: #fff; }
 .btn-danger{ background: #ef4444; border-color: #ef4444; color: #fff; }
 
 /* Estados vacíos/cargando */
-.muted{
-  color: #94a3b8;
-  text-align: center;
-  padding: 18px 0;
-}
+.muted{ color: #94a3b8; text-align: center; padding: 18px 0; }
 
-/* ----- Paginación (pegada al fondo) ----- */
-.pagination{
-  margin-top: auto; /* empuja hacia abajo del card */
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-}
-.pg{
-  background: #fff;
+/* ----- Paginación fija (se usa fuera de .table-container) ----- */
+.pagination-fixed{
+  position: fixed;
+  left: 50%; transform: translateX(-50%);
+  bottom: 16px; z-index: 50;
+  display: flex; gap: 6px;
+
+  background: rgba(255,255,255,.92);
+  backdrop-filter: blur(6px);
   border: 1px solid #e5e7eb;
-  color: #0f172a;
-  border-radius: 10px;
-  padding: 8px 12px;
-  min-width: 36px;
-  cursor: pointer;
-  font-weight: 700;
+  border-radius: 12px;
+  padding: 6px 8px;
+  box-shadow: 0 10px 30px rgba(15,23,42,.10);
 }
-.pg.active{
-  background: #0ea5e9;
-  border-color: #0ea5e9;
-  color: #fff;
+.pagination-fixed .pg{
+  background: #fff; border: 1px solid #e5e7eb; color: #0f172a;
+  border-radius: 10px; padding: 6px 10px; min-width: 34px;
+  font-weight: 700; cursor: pointer;
 }
-.pg:disabled{
-  opacity: .45;
-  cursor: not-allowed;
+.pagination-fixed .pg.current{
+  background: #2563eb; border-color: #2563eb; color: #fff; pointer-events: none;
 }
+.pagination-fixed .pg:disabled{ opacity: .45; cursor: not-allowed; }
 
-/* ----- Responsivo (altos pequeños) ----- */
-@media (max-height: 900px){
-  .table-container tbody tr{ height: 60px; }
-}
-@media (max-height: 800px){
-  .table-container tbody tr{ height: 56px; }
-}
+/* Si tenías la paginación antigua dentro del card, ocúltala */
+.pagination{ display: none !important; }
 
-/* ----- Responsivo (ancho pequeño: oculta textos de botones de acción) ----- */
+/* ----- Responsivo ----- */
 @media (max-width: 1400px){
-  .col-acciones .btn span{ display: none; }
+  .col-acciones .btn span{ display: none; } /* solo ícono */
   .btn{ padding: 6px; }
+  .col-acciones{ min-width: 220px; }
+}
+@media (max-height: 900px){
+  tbody td{ padding: 7px 10px; }
 }

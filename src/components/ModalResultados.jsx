@@ -4,7 +4,8 @@ import { supabase } from "../lib/supabaseClient";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import "../styles/ModalResultados.css";
-import { generarPDF_PAI } from "../pdf/ReportePAI";  // ⬅️ import del generador PDF
+import { generarPDF_PAI } from "../pdf/ReportePAI";  // ⬅️ generador PDF PAI
+import { getCurrentUserRole, canGenerateProfile } from "../lib/roles";
 
 // Plantilla Excel empaquetada por Vite (PAI)
 import PAI_TEMPLATE_URL from "../assets/templates/Hoja-de-calculo-para-PAI-vacio.xlsx?url";
@@ -19,9 +20,9 @@ const PRUEBA_IMG = {
 };
 
 // ====== Mapeos de escalas PAI para armar el JSON ======
-const CODES_CLINICAS   = ["SOM","ANS","TRA","DEP","MAN","PAR","ESQ","LIM","ANT","ALC","DRG"];
-const CODES_TRAT       = ["AGR","SUI","EST","FAS","RTR"];
-const CODES_INTERP     = ["DOM","AFA"];
+const CODES_CLINICAS = ["SOM","ANS","TRA","DEP","MAN","PAR","ESQ","LIM","ANT","ALC","DRG"];
+const CODES_TRAT     = ["AGR","SUI","EST","FAS","RTR"];
+const CODES_INTERP   = ["DOM","AFA"];
 
 // Ayudas
 const toIndex = (raw) => {
@@ -31,7 +32,7 @@ const toIndex = (raw) => {
   if (/^[1-4]$/.test(s)) return Number(s) - 1;
   if (/^[a-d]$/.test(s)) return s.charCodeAt(0) - 97;
   const m = { nada:0, poco:1, algo:2, mucho:3, af:0, lc:1, pc:2, mc:3 };
-  if (m.hasOwnProperty(s)) return m[s];
+  if (Object.prototype.hasOwnProperty.call(m, s)) return m[s];
   if (/absolut(a|amente)\s*falso/.test(s)) return 0;
   if (/liger(amente)?/.test(s)) return 1;
   if (/principal(mente)?/.test(s)) return 2;
@@ -41,6 +42,8 @@ const toIndex = (raw) => {
 
 // =================== COMPONENTE ===================
 export default function ModalResultados({ open, onClose, caso }) {
+  const [rol, setRol] = useState(null);
+
   const [loading, setLoading] = useState(false);
   const [tests, setTests] = useState([]);
   const [attemptsByCode, setAttemptsByCode] = useState({});
@@ -53,9 +56,15 @@ export default function ModalResultados({ open, onClose, caso }) {
 
   const [showPerfil, setShowPerfil] = useState(false);
 
-  // Carga pruebas + últimos intentos terminados
+  // Carga rol + pruebas + últimos intentos terminados
   useEffect(() => {
     if (!open || !caso?.id) return;
+
+    (async () => {
+      const r = await getCurrentUserRole();
+      setRol(r);
+    })();
+
     (async () => {
       setLoading(true);
       setTests([]); setAttemptsByCode({});
@@ -99,9 +108,21 @@ export default function ModalResultados({ open, onClose, caso }) {
     setDetalleTest(t); setShowDetalle(true); setPuntajes([]); setPuntajesLoading(true);
     try {
       const { data } = await supabase
-        .from("puntajes").select("escala, puntaje_conv")
-        .eq("intento_id", t.intentoId).order("escala");
-      setPuntajes(data || []);
+        .from("puntajes")
+        .select(`
+          escala_id,
+          puntaje_convertido,
+          escalas:escala_id ( codigo )
+        `)
+        .eq("intento_id", t.intentoId)
+        .order("escala_id");
+
+      const norm = (data || []).map(r => ({
+        escala: r?.escalas?.codigo || r.escala_id,
+        puntaje: r?.puntaje_convertido ?? null,
+      }));
+
+      setPuntajes(norm);
     } finally { setPuntajesLoading(false); }
   };
   const cerrarDetalle = () => { setShowDetalle(false); setDetalleTest(null); setPuntajes([]); };
@@ -165,19 +186,16 @@ export default function ModalResultados({ open, onClose, caso }) {
   }
 
   // ================== EXPORTAR PDF (PAI) ==================
-  /** Construye el JSON que espera generarPDF_PAI() a partir de 'caso' y 'puntajes' */
   function buildPaiJson(caso, puntajes) {
-    // Mapa: código → T (puntaje_conv)
     const byCode = {};
-    (puntajes || []).forEach(p => { byCode[String(p.escala).toUpperCase()] = Number(p.puntaje_conv); });
-    const t = (code) => (byCode[code] ?? null);
-
-    // Helpers para armar subescalas (sin bruto por ahora)
-    const mkSubs = (codes) => codes
-      .filter(c => byCode[c] != null)
-      .map(c => ({ nombre: c, bruto: "", t: byCode[c] }));
-
-    // Serie para gráfico (usa primeros 6 valores de la sección si existen)
+    (puntajes || []).forEach(p => {
+      if (!p) return;
+      const code = String(p.escala || "").toUpperCase();
+      const val = p.puntaje != null ? Number(p.puntaje) : null;
+      if (code) byCode[code] = val;
+    });
+    const mkSubs = (codes) =>
+      codes.filter(c => byCode[c] != null).map(c => ({ nombre: c, bruto: "", t: byCode[c] }));
     const serie = (codes) => mkSubs(codes).slice(0, 6).map(s => s.t);
 
     return {
@@ -261,10 +279,31 @@ export default function ModalResultados({ open, onClose, caso }) {
 
         <div className="mr-actions">
           <button
-            className={allReady ? "btn-primary mr-btn" : "btn-soft mr-btn mr-btn--disabled"}
-            disabled={!allReady}
-            onClick={() => setShowPerfil(true)}
-            title={allReady ? "Generar perfil" : "Completa PAI + MMPI-2 + MCMI-IV para habilitar"}
+            className={
+              allReady && canGenerateProfile(rol) ? "btn-primary mr-btn" : "btn-soft mr-btn mr-btn--disabled"
+            }
+            disabled={!allReady || !canGenerateProfile(rol)}
+            onClick={async () => {
+              try {
+                if (!canGenerateProfile(rol)) return;
+                const { data, error } = await supabase.rpc("generate_case_profile", { p_caso_id: caso.id });
+                if (error) throw error;
+                setShowPerfil(true);
+                if (data?.signed_url) {
+                  window.open(data.signed_url, "_blank");
+                }
+              } catch (e) {
+                console.error(e);
+                alert(e.message || "No fue posible generar el perfil.");
+              }
+            }}
+            title={
+              !canGenerateProfile(rol)
+                ? "Tu rol no puede generar perfiles (solo ver/exportar)"
+                : allReady
+                  ? "Generar perfil"
+                  : "Completa PAI + MMPI-2 + MCMI-IV para habilitar"
+            }
           >
             Generar perfil
           </button>
@@ -294,7 +333,7 @@ export default function ModalResultados({ open, onClose, caso }) {
                     <thead><tr><th>Escala</th><th>Valor</th></tr></thead>
                     <tbody>
                       {puntajes.slice(0, 20).map((r, i) => (
-                        <tr key={i}><td>{r.escala}</td><td>{String(r.puntaje_conv)}</td></tr>
+                        <tr key={i}><td>{r.escala}</td><td>{r.puntaje ?? "—"}</td></tr>
                       ))}
                     </tbody>
                   </table>
@@ -315,7 +354,6 @@ export default function ModalResultados({ open, onClose, caso }) {
                   📁 Exportar Excel
                 </button>
 
-                {/* === Botón funcional que arma JSON y genera PDF === */}
                 <button className="btn-soft" onClick={onExportPdfPAI}>
                   📄 Exportar PDF (PAI)
                 </button>
@@ -331,7 +369,7 @@ export default function ModalResultados({ open, onClose, caso }) {
           >
             <div className="modal result-modal" onMouseDown={(e) => e.stopPropagation()}>
               <div className="modal-head">
-                <h3>Informe final (borrador)</h3>
+                <h3>Informe final</h3>
                 <button className="close" onClick={() => setShowPerfil(false)}>✕</button>
               </div>
 
@@ -340,27 +378,75 @@ export default function ModalResultados({ open, onClose, caso }) {
                   Paciente: <strong>{caso?.paciente_nombre}</strong> · CI{" "}
                   <strong>{caso?.paciente_ci || "—"}</strong>
                 </p>
-                <div className="card" style={{ marginTop: 6 }}>
-                  <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>Resumen</p>
-                  <ul style={{ marginTop: 8, paddingLeft: 18 }}>
-                    <li>PAI: {attemptsByCode["PAI"] ? "completado ✅" : "pendiente"}</li>
-                    <li>MMPI-2: {attemptsByCode["MMPI-2"] ? "completado ✅" : "pendiente"}</li>
-                    <li>MCMI-IV: {attemptsByCode["MCMI-IV"] ? "completado ✅" : "pendiente"}</li>
-                  </ul>
-                  <p className="muted" style={{ marginTop: 8 }}>
-                    (Próximamente: perfil consolidado con IA y gráficos.)
-                  </p>
-                </div>
+                <PerfilDescargable casoId={caso?.id} />
               </div>
 
               <div className="result-actions">
-                <button className="btn-soft" onClick={() => alert("Exportar informe PDF (pendiente)")}>
-                  📄 Exportar informe PDF
+                <button className="btn-soft" onClick={() => setShowPerfil(false)}>
+                  Cerrar
                 </button>
               </div>
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function PerfilDescargable({ casoId }) {
+  const [loading, setLoading] = useState(true);
+  const [perfil, setPerfil] = useState(null);
+  const [signed, setSigned] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from("perfiles_caso")
+        .select("id, bucket, path, generated_at, mime_type, size_bytes")
+        .eq("caso_id", casoId)
+        .order("generated_at", { ascending: false })
+        .limit(1);
+
+      const row = (data || [])[0] || null;
+      if (!alive) return;
+      setPerfil(row || null);
+
+      if (row?.bucket && row?.path) {
+        const { data: urlData, error } = await supabase
+          .storage
+          .from(row.bucket)
+          .createSignedUrl(row.path, 60 * 5); // 5 minutos
+        if (!error) setSigned(urlData?.signedUrl || null);
+      }
+      setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [casoId]);
+
+  if (loading) return <div className="muted">Buscando perfil…</div>;
+  if (!perfil) return <div className="muted">Aún no hay perfiles generados para este caso.</div>;
+
+  return (
+    <div className="card" style={{ marginTop: 6 }}>
+      <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>Perfil disponible</p>
+      <ul style={{ marginTop: 8, paddingLeft: 18 }}>
+        <li><strong>Generado:</strong> {perfil.generated_at ? new Date(perfil.generated_at).toLocaleString() : "—"}</li>
+        <li><strong>Archivo:</strong> {perfil.path}</li>
+        <li><strong>Tamaño:</strong> {perfil.size_bytes ? `${perfil.size_bytes} bytes` : "—"}</li>
+      </ul>
+      <div style={{ marginTop: 8 }}>
+        <a
+          className="btn-confirm-exit"
+          href={signed || "#"}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => { if (!signed) e.preventDefault(); }}
+        >
+          📄 Descargar PDF
+        </a>
       </div>
     </div>
   );

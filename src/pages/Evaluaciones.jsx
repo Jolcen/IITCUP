@@ -1,27 +1,11 @@
 // src/pages/Evaluaciones.jsx
 import "../styles/Evaluaciones.css";
-import {
-  FaUserCircle,
-  FaEdit,
-  FaTrash,
-  FaPlay,
-  FaSearch,
-  FaEye,
-  FaUserPlus,
-} from "react-icons/fa";
-import {
-  useEffect,
-  useMemo,
-  useState,
-  useCallback,
-  useRef,
-} from "react";
+import { FaUserCircle, FaEdit, FaTrash, FaPlay, FaSearch, FaEye, FaUserPlus } from "react-icons/fa";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-// Unifica crear/editar/ver evaluación
 import ModalEvaluacion from "../components/ModalEvaluacion";
-// Selector de pacientes (frontend, sin backend por ahora)
 import ModalSelectPaciente from "../components/ModalSelectPaciente";
 
 const PAGE_SIZE = 8;
@@ -31,7 +15,7 @@ export default function Evaluaciones() {
 
   // --- Perfil actual (rol) ---
   const [userId, setUserId] = useState(null);
-  const [role, setRole] = useState(null); // administrador | operador (encargado) | asistente
+  const [role, setRole] = useState(null); // administrador | encargado | operador | asistente
 
   useEffect(() => {
     let alive = true;
@@ -41,19 +25,15 @@ export default function Evaluaciones() {
       setUserId(user?.id ?? null);
 
       if (user?.id) {
-        const { data } = await supabase
-          .from("app_users")
-          .select("rol")
-          .eq("id", user.id)
-          .maybeSingle();
+        const { data } = await supabase.from("app_users").select("rol").eq("id", user.id).maybeSingle();
         setRole(data?.rol ?? null);
       }
     })();
     return () => { alive = false; };
   }, []);
 
-  const isAdmin = role === "administrador";
-  const isOperator = role === "operador";   // “Encargado”
+  const isAdmin = role === "administrador" || role === "encargado";
+  const isOperator = role === "operador";
   const isAssistant = role === "asistente";
 
   // --- Estado tabla/paginación/filtros ---
@@ -64,64 +44,39 @@ export default function Evaluaciones() {
   const [total, setTotal] = useState(0);
 
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState("todos"); // todos | pendiente | en_evaluacion | evaluado
+  const [status, setStatus] = useState("todos"); // todos | pendiente | asignado | en_progreso | completada | cancelado
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  // --- Pacientes (frontend/mock) ---------------------------------
-  // Aquí tendrás la lista real al conectar backend.
-  const [pacientesMock] = useState([
-    // { id:"p1", nombre:"Juan Pérez", ci:"123456", email:"juan@mail.com" },
-    // { id:"p2", nombre:"María López", ci:"654321", email:"maria@mail.com" },
-  ]);
-
-  // Modal: asignación de paciente a un caso
+  // --- Asignar paciente ---
   const [selectPaciente, setSelectPaciente] = useState({ open: false, caseId: null });
   const abrirAsignar = (r) => setSelectPaciente({ open: true, caseId: r.id });
   const cerrarAsignar = () => setSelectPaciente({ open: false, caseId: null });
-  const asignarPaciente = (pacienteId) => {
-    // FRONTEND ONLY: actualizamos la fila en memoria
-    const pac = pacientesMock.find(p => p.id === pacienteId);
-    setRows(prev =>
-      prev.map(r =>
-        r.id === selectPaciente.caseId
-          ? {
-              ...r,
-              paciente_id: pac?.id,
-              paciente_nombre: pac?.nombre ?? r.paciente_nombre,
-              // si quieres más campos para “ver” luego, almacénalos aquí
-              paciente_ci: pac?.ci,
-              paciente_email: pac?.email,
-            }
-          : r
-      )
-    );
+  const asignarPaciente = async (pacienteId) => {
+    if (!isAdmin) return;
+    const { error } = await supabase.from("casos").update({ paciente_id: pacienteId }).eq("id", selectPaciente.caseId);
+    if (error) alert(error.message);
     cerrarAsignar();
+    await loadRef.current();
   };
 
-  // --- Carga de casos ---
+  // --- Carga de casos (desde la VISTA) ---
   const load = useCallback(async () => {
     setLoading(true);
-
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
-    // 🔹 Traemos columnas base (las que usa la tabla y los modales)
     let query = supabase
-      .from("casos")
+      .from("v_caso_resumen")
       .select(
         `
         id,
-        paciente_id,               -- opcional
-        paciente_nombre,           -- opcional (si lo guardas denormalizado)
-        paciente_ci,               -- opcional
-        fecha_nacimiento,
-        genero,
-        nivel_educativo,
-        ocupacion,
-        antecedentes,
+        paciente_id,
+        paciente_nombre,
+        paciente_ci,
         motivacion,
         asignado_a,
+        operador_nombre,
         creado_en,
         estado
         `,
@@ -132,7 +87,7 @@ export default function Evaluaciones() {
 
     if (q.trim()) {
       query = query.or(
-        `paciente_nombre.ilike.%${q}%,paciente_ci.ilike.%${q}%,motivacion.ilike.%${q}%`
+        `paciente_nombre.ilike.%${q}%,paciente_ci.ilike.%${q}%,motivacion.ilike.%${q}%,operador_nombre.ilike.%${q}%`
       );
     }
     if (status !== "todos") {
@@ -148,76 +103,43 @@ export default function Evaluaciones() {
       setRows(data || []);
       setTotal(count || 0);
     }
-
     setLoading(false);
   }, [page, status, q]);
 
-  // carga inicial + cada cambio de page/status/q
   useEffect(() => { load(); }, [load]);
-
-  // realtime: mantén siempre la versión más reciente de load
   const loadRef = useRef(load);
   useEffect(() => { loadRef.current = load; }, [load]);
 
+  // Realtime: refresca cuando cambie "casos"
   useEffect(() => {
-    const channel = supabase
+    const ch1 = supabase
       .channel("rt-casos")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "casos" },
-        () => loadRef.current()
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "casos" }, () => loadRef.current())
       .subscribe();
-    return () => supabase.removeChannel(channel);
+    return () => supabase.removeChannel(ch1);
   }, []);
 
-  // --- Modal unificado (crear/editar/ver) ---
-  const [modal, setModal] = useState({
-    open: false,
-    mode: "create",     // create | edit | view
-    initialCase: null,  // datos del caso para edit/view
-  });
+  // --- Modal evaluación ---
+  const [modal, setModal] = useState({ open: false, mode: "create", initialCase: null });
+  const openCreate = () => setModal({ open: true, mode: "create", initialCase: null });
 
-  const openCreate = () =>
-    setModal({ open: true, mode: "create", initialCase: null });
-
-  // En Ver y Editar pedimos el registro completo (con fallback)
   const openView = async (r) => {
-    try {
-      const { data, error } = await supabase
-        .from("casos")
-        .select("*")
-        .eq("id", r.id)
-        .maybeSingle();
-      setModal({ open: true, mode: "view", initialCase: error ? r : (data || r) });
-    } catch {
-      setModal({ open: true, mode: "view", initialCase: r });
-    }
+    const { data, error } = await supabase.from("casos").select("*").eq("id", r.id).maybeSingle();
+    setModal({ open: true, mode: "view", initialCase: error ? r : (data || r) });
   };
 
   const openEdit = async (r) => {
-    try {
-      const { data, error } = await supabase
-        .from("casos")
-        .select("*")
-        .eq("id", r.id)
-        .maybeSingle();
-      setModal({ open: true, mode: "edit", initialCase: error ? r : (data || r) });
-    } catch {
-      setModal({ open: true, mode: "edit", initialCase: r });
-    }
+    const { data, error } = await supabase.from("casos").select("*").eq("id", r.id).maybeSingle();
+    setModal({ open: true, mode: "edit", initialCase: error ? r : (data || r) });
   };
 
   const closeModal = () => setModal({ open: false, mode: "create", initialCase: null });
-
-  // --- Acciones por fila ---
-  const toSlug = (s) => (s || "").toString().toLowerCase().replace(/\s+/g, "-");
 
   const handleRealizar = (r) => {
     const params = new URLSearchParams({
       case: r.id,
       nombre: r.paciente_nombre ?? "",
-      suggested: r.prueba ? toSlug(r.prueba) : ""
+      suggested: ""
     });
     navigate(`/tests?${params.toString()}`);
   };
@@ -225,24 +147,21 @@ export default function Evaluaciones() {
   const handleEliminar = async (r) => {
     if (!isAdmin) return;
     if (!confirm(`¿Eliminar la evaluación de ${r.paciente_nombre || "este caso"}?`)) return;
-
     const { error } = await supabase.from("casos").delete().eq("id", r.id);
-    if (error) {
-      alert(error.message);
-    } else {
-      if (total - 1 <= (page - 1) * PAGE_SIZE && page > 1) {
-        setPage((p) => p - 1);
-      } else {
-        load();
-      }
+    if (error) alert(error.message);
+    else {
+      if (total - 1 <= (page - 1) * PAGE_SIZE && page > 1) setPage((p) => p - 1);
+      else load();
     }
   };
 
   const statusChip = (s) => (
     <span className={`chip chip-${s}`}>
       {s === "pendiente" && "Pendiente"}
-      {s === "en_evaluacion" && "En evaluación"}
-      {s === "evaluado" && "Evaluado"}
+      {s === "asignado" && "Asignado"}
+      {s === "en_progreso" && "En progreso"}
+      {s === "completada" && "Completada"}
+      {s === "cancelado" && "Cancelado"}
     </span>
   );
 
@@ -258,38 +177,31 @@ export default function Evaluaciones() {
   return (
     <div className="evaluaciones-page">
       <div className="header">
-        <div>
-          <p>Lista de casos creados para ser evaluados</p>
-        </div>
+        <div><p>Lista de casos creados para ser evaluados</p></div>
 
         <div className="actions-right">
           <div className="searchbox">
             <FaSearch />
             <input
-              placeholder="Buscar por nombre, CI o motivo…"
+              placeholder="Buscar por nombre, CI, operador o motivo…"
               value={q}
-              onChange={(e) => {
-                setPage(1);
-                setQ(e.target.value);
-              }}
+              onChange={(e) => { setPage(1); setQ(e.target.value); }}
             />
           </div>
 
           <select
             className="filtro"
             value={status}
-            onChange={(e) => {
-              setPage(1);
-              setStatus(e.target.value);
-            }}
+            onChange={(e) => { setPage(1); setStatus(e.target.value); }}
           >
             <option value="todos">Todos</option>
             <option value="pendiente">Pendiente</option>
-            <option value="en_evaluacion">En evaluación</option>
-            <option value="evaluado">Evaluado</option>
+            <option value="asignado">Asignado</option>
+            <option value="en_progreso">En progreso</option>
+            <option value="completada">Completada</option>
+            <option value="cancelado">Cancelado</option>
           </select>
 
-          {/* Crear evaluación: puede estar sin paciente (agendada) */}
           {isAdmin && (
             <button className="btn-add" onClick={openCreate}>
               + Nueva evaluación
@@ -300,195 +212,128 @@ export default function Evaluaciones() {
 
       <div className="table-container">
         <table>
+          <colgroup>
+            <col className="c-individuo" />
+            <col className="c-ci" />
+            <col className="c-detalles" />
+            <col className="c-fecha" />
+            <col className="c-estado" />
+            <col className="c-acciones" />
+          </colgroup>
+
           <thead>
             <tr>
-              <th>Individuo</th>
-              <th>CI</th>
-              <th>Motivo/Contexto</th>
-              <th>Fecha</th>
-              <th>Estado</th>
-              <th className="col-acciones-header">Acción</th>
+              <th className="col-individuo">Individuo</th>
+              <th className="col-ci">CI</th>
+              <th className="col-detalles">Motivo/Contexto</th>
+              <th className="col-fecha">Fecha</th>
+              <th className="col-estado">Estado</th>
+              <th className="col-acciones">Acción</th>
             </tr>
           </thead>
 
           <tbody>
             {loading && (
-              <tr>
-                <td colSpan={6} className="muted">Cargando…</td>
-              </tr>
+              <tr><td colSpan={6} className="muted">Cargando…</td></tr>
             )}
 
             {!loading && rows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="muted">Sin registros</td>
-              </tr>
+              <tr><td colSpan={6} className="muted">Sin registros</td></tr>
             )}
 
-            {!loading &&
-              rows.map((r) => {
-                const canDoTest =
-                  isOperator && userId && r.asignado_a === userId && r.estado !== "evaluado";
-                const canEdit = isAdmin;
-                const canDelete = isAdmin;
-                const canView = isAssistant || canEdit || canDoTest;
-                const canAssignPatient = isAdmin || isOperator; // quiénes pueden asignar paciente
+            {!loading && rows.map((r) => {
+              const canDoTest = isOperator && userId && r.asignado_a === userId && !["completada","cancelado"].includes(r.estado);
+              const canEdit = isAdmin;
+              const canDelete = isAdmin;
+              const canView = isAssistant || canEdit || canDoTest;
+              const canAssignPatient = isAdmin;
 
-                return (
-                  <tr key={r.id}>
-                    <td className="col-individuo">
-                      <FaUserCircle className="avatar" />
-                      <div className="name">
-                        <div className="nombre">
-                          {r.paciente_nombre || <span className="muted">— Sin paciente</span>}
-                        </div>
-
-                        {/* Botón Asignar si no hay paciente */}
-                        {!r.paciente_nombre && canAssignPatient && (
-                          <button
-                            className="btn btn-sm btn-light"
-                            title="Asignar paciente"
-                            onClick={() => abrirAsignar(r)}
-                            style={{ marginTop: 6 }}
-                          >
-                            <FaUserPlus />
-                            <span>Asignar</span>
-                          </button>
-                        )}
+              return (
+                <tr key={r.id}>
+                  <td className="col-individuo">
+                    <FaUserCircle className="avatar" />
+                    <div className="name">
+                      <div className="nombre" title={r.paciente_nombre || ""}>
+                        {r.paciente_nombre || <span className="muted">— Sin paciente</span>}
                       </div>
-                    </td>
+                      {r.operador_nombre && <div className="sub">Asignado a: {r.operador_nombre}</div>}
+                    </div>
+                  </td>
 
-                    <td className="col-ci">{r.paciente_ci || "—"}</td>
+                  <td className="col-ci">{r.paciente_ci || "—"}</td>
+                  <td className="col-detalles" title={r.motivacion || ""}>{r.motivacion || "—"}</td>
+                  <td className="col-fecha">{r.creado_en ? new Date(r.creado_en).toLocaleDateString() : "—"}</td>
+                  <td className="col-estado">{statusChip(r.estado)}</td>
 
-                    <td className="col-detalles" title={r.motivacion || ""}>
-                      {r.motivacion || "—"}
-                    </td>
+                  <td className="col-acciones">
+                    <div className="actions-wrap">
+                      {canAssignPatient && !r.paciente_nombre && (
+                        <button
+                          className="btn btn-sm btn-light"
+                          title="Asignar paciente"
+                          onClick={() => abrirAsignar(r)}
+                        >
+                          <FaUserPlus /><span>Asignar</span>
+                        </button>
+                      )}
 
-                    <td className="col-fecha">
-                      {r.creado_en
-                        ? new Date(r.creado_en).toLocaleDateString()
-                        : "—"}
-                    </td>
+                      {canDoTest && (
+                        <button className="btn btn-sm btn-primary" title="Realizar" onClick={() => handleRealizar(r)}>
+                          <FaPlay /><span>Realizar</span>
+                        </button>
+                      )}
 
-                    <td className="col-estado">{statusChip(r.estado)}</td>
+                      {canView && (
+                        <button className="btn btn-sm btn-light" title="Ver" onClick={() => openView(r)}>
+                          <FaEye /><span>Ver</span>
+                        </button>
+                      )}
 
-                    <td className="col-acciones">
-                      <div className="actions-wrap">
-                        {/* Operador asignado: Realizar */}
-                        {canDoTest && (
-                          <button
-                            className="btn btn-sm btn-primary"
-                            title="Realizar"
-                            onClick={() => handleRealizar(r)}
-                          >
-                            <FaPlay />
-                            <span>Realizar</span>
-                          </button>
-                        )}
+                      {canEdit && (
+                        <button className="btn btn-sm btn-light" title="Editar" onClick={() => openEdit(r)}>
+                          <FaEdit /><span>Editar</span>
+                        </button>
+                      )}
 
-                        {/* Ver (asistente siempre; admin y operador también pueden) */}
-                        {canView && (
-                          <button
-                            className="btn btn-sm btn-light"
-                            title="Ver"
-                            onClick={() => openView(r)}
-                          >
-                            <FaEye />
-                            <span>Ver</span>
-                          </button>
-                        )}
-
-                        {/* Admin: Editar y Eliminar */}
-                        {canEdit && (
-                          <button
-                            className="btn btn-sm btn-light"
-                            title="Editar"
-                            onClick={() => openEdit(r)}
-                          >
-                            <FaEdit />
-                            <span>Editar</span>
-                          </button>
-                        )}
-
-                        {canDelete && (
-                          <button
-                            className="btn btn-sm btn-danger"
-                            title="Eliminar"
-                            onClick={() => handleEliminar(r)}
-                          >
-                            <FaTrash />
-                            <span>Eliminar</span>
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+                      {canDelete && (
+                        <button className="btn btn-sm btn-danger" title="Eliminar" onClick={() => handleEliminar(r)}>
+                          <FaTrash /><span>Eliminar</span>
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
-
-        {/* Paginación sin scroll */}
-        <div className="pagination">
-          <button
-            className="pg"
-            disabled={page === 1}
-            onClick={() => setPage(1)}
-            aria-label="Primera"
-          >
-            «
-          </button>
-          <button
-            className="pg"
-            disabled={page === 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            aria-label="Anterior"
-          >
-            ‹
-          </button>
-
-        {pagesToShow.map((n) => (
-            <button
-              key={n}
-              className={`pg ${n === page ? "active" : ""}`}
-              onClick={() => setPage(n)}
-            >
-              {n}
-            </button>
-          ))}
-
-          <button
-            className="pg"
-            disabled={page === totalPages}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            aria-label="Siguiente"
-          >
-            ›
-          </button>
-          <button
-            className="pg"
-            disabled={page === totalPages}
-            onClick={() => setPage(totalPages)}
-            aria-label="Última"
-          >
-            »
-          </button>
-        </div>
       </div>
 
-      {/* Modal unificado de evaluación */}
+      {/* Paginación fija (solo si hay más de 1 página) */}
+      {totalPages > 1 && (
+        <div className="pagination-fixed">
+          <button className="pg" disabled={page === 1} onClick={() => setPage(1)} aria-label="Primera">«</button>
+          <button className="pg" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))} aria-label="Anterior">‹</button>
+          {pagesToShow.map((n) => (
+            <button key={n} className={`pg ${n === page ? "current" : ""}`} onClick={() => setPage(n)}>{n}</button>
+          ))}
+          <button className="pg" disabled={page === totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} aria-label="Siguiente">›</button>
+          <button className="pg" disabled={page === totalPages} onClick={() => setPage(totalPages)} aria-label="Última">»</button>
+        </div>
+      )}
+
       {modal.open && (
         <ModalEvaluacion
-          mode={modal.mode}                // "create" | "edit" | "view"
-          initialCase={modal.initialCase}  // null para create
+          mode={modal.mode}
+          initialCase={modal.initialCase}
           onClose={closeModal}
-          onSaved={load}                   // refresca al guardar
+          onSaved={load}
         />
       )}
 
-      {/* Modal para asignar paciente (frontend/mock) */}
       {selectPaciente.open && (
         <ModalSelectPaciente
-          pacientes={pacientesMock}
+          pacientes={[]}
           onClose={cerrarAsignar}
           onSelect={asignarPaciente}
         />

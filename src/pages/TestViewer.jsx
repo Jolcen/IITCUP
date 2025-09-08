@@ -1,4 +1,3 @@
-// src/pages/TestViewer.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
@@ -20,7 +19,7 @@ export default function TestViewer() {
   const [err, setErr] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Tiempo (no visible), pre-start y BD ids
+  // Tiempo / intento
   const [time, setTime] = useState(0);
   const tickingRef = useRef(null);
   const startedAtRef = useRef(null);
@@ -57,23 +56,20 @@ export default function TestViewer() {
     [testId]
   );
 
-  // ====== TTS: voz más humana y SIN signos ======
+  // ====== TTS: prioriza Piper / neural ======
   const [ttsVoice, setTtsVoice] = useState(null);
-  const PREFERRED_VOICE_CANDIDATES = [
-    "Google español de Estados Unidos",
-    "Google español",
-    "Microsoft Sabina Online (Natural) - Spanish (Mexico)",
-    "Microsoft Dalia Online (Natural) - Spanish (Spain)",
-    "Microsoft Alvaro Online (Natural) - Spanish (Spain)",
-  ];
   function pickBestSpanishVoice(voices) {
-    for (const wanted of PREFERRED_VOICE_CANDIDATES) {
-      const v = voices.find(x => (x.name || "").toLowerCase().includes(wanted.toLowerCase()));
-      if (v) return v;
-    }
-    const esVoices = voices.filter(v => (v.lang || "").toLowerCase().startsWith("es"));
-    const natural = esVoices.find(v => /natural|online|neural/i.test(v.name || "")) || esVoices[0];
-    return natural || voices[0] || null;
+    const piper = voices.find(v =>
+      (v.lang || "").toLowerCase().startsWith("es") && /piper/i.test(v.name || "")
+    );
+    if (piper) return piper;
+    const natural = voices.find(v =>
+      (v.lang || "").toLowerCase().startsWith("es") &&
+      /neural|natural|online/i.test(v.name || "")
+    );
+    if (natural) return natural;
+    const es = voices.find(v => (v.lang || "").toLowerCase().startsWith("es"));
+    return es || voices[0] || null;
   }
   useEffect(() => {
     function loadVoices() {
@@ -91,7 +87,7 @@ export default function TestViewer() {
     let t = String(raw);
     t = t.replace(/\bhttps?:\/\/\S+/gi, " ");
     t = t.replace(/[_/|\\\-]+/g, " ");
-    t = t.replace(/[^\p{L}\s]+/gu, " "); // solo letras y espacios
+    t = t.replace(/[^\p{L}\s]+/gu, " ");
     t = t.replace(/\s+/g, " ").trim();
     return t;
   }
@@ -118,7 +114,7 @@ export default function TestViewer() {
         const u = new SpeechSynthesisUtterance(chunk);
         u.lang = (ttsVoice?.lang) || "es-ES";
         if (ttsVoice) u.voice = ttsVoice;
-        u.rate = 0.92; u.pitch = 1.0; u.volume = 1.0;
+        u.rate = 0.95; u.pitch = 1.0; u.volume = 1.0;
         if (i > 0) u.text = " " + u.text;
         window.speechSynthesis.speak(u);
       });
@@ -126,7 +122,6 @@ export default function TestViewer() {
   }
   // ====== fin TTS ======
 
-  // focus-mode: oculta sidebar mientras este componente está montado
   useEffect(() => {
     document.body.classList.add("focus-test");
     return () => { document.body.classList.remove("focus-test"); };
@@ -135,6 +130,7 @@ export default function TestViewer() {
   async function ensureAttempt(pid) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Sin sesión.");
+
     const { data: abiertos, error: e1 } = await supabase
       .from("intentos_prueba")
       .select("id")
@@ -143,13 +139,16 @@ export default function TestViewer() {
       .is("terminado_en", null)
       .limit(1);
     if (e1) throw e1;
+
     if (abiertos && abiertos.length) return abiertos[0].id;
+
     const { data: creado, error: e2 } = await supabase
       .from("intentos_prueba")
       .insert({ caso_id: caseId, prueba_id: pid })
       .select("id")
       .single();
     if (e2) throw e2;
+
     return creado.id;
   }
 
@@ -186,17 +185,16 @@ export default function TestViewer() {
 
         const { data, error } = await supabase
           .from("items_prueba")
-          .select("id, enunciado, tipo, opciones, inverso, orden, activo")
+          .select("id, enunciado, opciones, inverso, orden, activo")
           .eq("prueba_id", pid)
           .eq("activo", true)
           .order("orden", { ascending: true })
-          .limit(1000);
+          .limit(2000);
         if (error) throw error;
         if (!data?.length) throw new Error("No hay ítems para esta prueba.");
         const mapped = data.map((r, i) => ({
           id: r.id,
           texto: r.enunciado,
-          tipo: r.tipo || "opcion",
           opciones: normalizeOptions(r.opciones),
           inverso: !!r.inverso,
           orden: r.orden ?? i + 1,
@@ -227,7 +225,7 @@ export default function TestViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testId, caseId, code, storageKey]);
 
-  // Iniciar prueba → arranca cronómetro y marca iniciado_en
+  // Iniciar prueba → cronómetro e iniciado_en
   async function startTest() {
     if (!attemptId) return;
     try {
@@ -247,7 +245,6 @@ export default function TestViewer() {
     }
   }
 
-  // Guardar progreso índice
   useEffect(() => {
     localStorage.setItem(
       storageKey,
@@ -255,8 +252,18 @@ export default function TestViewer() {
     );
   }, [currentIndex, testId, caseId, storageKey]);
 
-  // Guardar respuesta
-  async function handleAnswer(valor) {
+  // --- helper: puntaje por opción ---
+  function scoreFromOption(op, idxEnLista) {
+    if (op && typeof op === "object") {
+      if (Number.isFinite(op.score)) return op.score;
+      if (typeof op.value === "number") return op.value;
+    }
+    // fallback Nada/Poco/Algo/Mucho → 0..3
+    return idxEnLista ?? 0;
+  }
+
+  // Guardar respuesta (JSONB requerido por el backend)
+  async function handleAnswer(opcionElegida) {
     if (savingRef.current || !attemptId) return;
     const idxSnapshot = currentIndex;
     const q = items[idxSnapshot];
@@ -264,17 +271,30 @@ export default function TestViewer() {
 
     savingRef.current = true;
     try {
+      const idxEnLista = Array.isArray(q.opciones)
+        ? q.opciones.findIndex(o => o === opcionElegida || o?.label === opcionElegida)
+        : 0;
+
+      const code_txt =
+        typeof opcionElegida === "string"
+          ? opcionElegida
+          : (opcionElegida?.label ?? String(opcionElegida));
+
+      const score_num = scoreFromOption(opcionElegida, Math.max(0, idxEnLista));
+
       const payload = {
         caso_id: caseId,
         prueba_id: pruebaId,
         item_id: q.id,
-        valor: String(valor),
         intento_id: attemptId,
         invertido: q.inverso ?? false,
+        valor: { code_txt, score_num }, // ← JSONB
       };
+
       const { error } = await supabase
         .from("respuestas")
         .upsert(payload, { onConflict: "intento_id,item_id", ignoreDuplicates: false });
+
       if (error) console.error("Error guardando respuesta:", error);
     } catch (e) {
       console.error("Excepción guardando respuesta:", e);
@@ -284,9 +304,8 @@ export default function TestViewer() {
     }
   }
 
-  // === Fin de prueba: 1) pedir firma paciente -> 2) finalizar intento -> 3) pantalla final ===
+  // === Fin de prueba: firma → finalizar intento → pantalla final ===
   function requestSignature() {
-    // abrir modal de firma
     setConsentChecked(false);
     setHasDrawn(false);
     setShowSignModal(true);
@@ -294,36 +313,59 @@ export default function TestViewer() {
   }
 
   async function finalizeAttemptAfterSignature() {
-    // Cierra modal de firma y marca finalizado
     setShowSignModal(false);
     if (finishedRef.current) return;
     finishedRef.current = true;
+
     try {
-      let dur = time;
-      if (startedAtRef.current) {
-        const ms = Date.now() - startedAtRef.current;
-        dur = Math.max(dur, Math.floor(ms / 1000));
+      // --- subir firma al bucket ---
+      let firmaPath = null;
+      if (canvasRef.current) {
+        const dataUrl = canvasRef.current.toDataURL("image/png");
+        const blob = await (await fetch(dataUrl)).blob();
+        const filePath = `${caseId || "sin-caso"}/${code}/${attemptId}/${Date.now()}.png`;
+
+        const { error: upErr } = await supabase
+          .storage.from("evidencias")
+          .upload(filePath, blob, { contentType: "image/png", upsert: false });
+
+        if (upErr) {
+          console.error("Error subiendo firma:", upErr);
+          alert("No se pudo guardar la firma, intenta de nuevo.");
+          finishedRef.current = false;
+          setShowSignModal(true);
+          return;
+        }
+        firmaPath = filePath;
       }
-      if (attemptId) {
-        await supabase
-          .from("intentos_prueba")
-          .update({
-            terminado_en: new Date().toISOString(),
-            duracion_segundos: dur,
-          })
-          .eq("id", attemptId);
-        // Si luego quieres guardar la firma (base64) en BD, aquí puedes tomarla:
-        // const dataUrl = canvasRef.current?.toDataURL("image/png");
-        // … y enviarla a una columna nueva (firma_base64) si existe.
+
+      // --- cerrar intento vía RPC (la función ya marca terminado/duración) ---
+      const { error: rpcErr } = await supabase.rpc("finalizar_intento", {
+        p_intento_id: attemptId,
+        p_firma_bucket: "evidencias",
+        p_firma_path: firmaPath,
+        p_firma_mime: "image/png",
+        p_user_agent: navigator.userAgent,
+        p_comentario: null,
+      });
+
+      if (rpcErr) {
+        console.error("finalizar_intento RPC error:", rpcErr);
+        alert("No se pudo cerrar la prueba. Revisa tu conexión e inténtalo otra vez.");
+        finishedRef.current = false;
+        setShowSignModal(true);
+        return;
       }
+
     } catch (e) {
-      console.error("Error marcando intento como terminado:", e);
+      console.error("Error finalizando:", e);
     } finally {
       localStorage.removeItem(storageKey);
       if (tickingRef.current) clearInterval(tickingRef.current);
       setShowFinishScreen(true);
     }
   }
+
 
   function normalizeOptions(v) {
     if (Array.isArray(v)) return v;
@@ -340,19 +382,16 @@ export default function TestViewer() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
-    // tamaño responsivo básico
     const dpr = window.devicePixelRatio || 1;
-    const w = Math.min(600, window.innerWidth - 48);
-    const h = 180;
+    const w = Math.min(700, window.innerWidth - 48);
+    const h = 200;
     canvas.width = Math.floor(w * dpr);
     canvas.height = Math.floor(h * dpr);
     canvas.style.width = w + "px";
     canvas.style.height = h + "px";
     ctx.scale(dpr, dpr);
-    // fondo blanco
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, w, h);
-    // guía
     ctx.strokeStyle = "#ddd";
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -401,7 +440,7 @@ export default function TestViewer() {
       ctx.stroke();
       last = p;
     }
-    function end(e) { drawing = false; last = null; }
+    function end() { drawing = false; last = null; }
 
     canvas.addEventListener("mousedown", start);
     canvas.addEventListener("mousemove", move);
@@ -430,12 +469,12 @@ export default function TestViewer() {
   }
   // ====== fin firma ======
 
-  // ====== Modal contraseña operador (anti-autofill) ======
+  // ====== Modal contraseña operador ======
   function openAskPassModal(onSuccess) {
     deferredActionRef.current = onSuccess;
     setAskPassOpen(true);
     setTimeout(() => {
-      operatorPassInputRef.current?.setAttribute("value", ""); // evita autofill
+      operatorPassInputRef.current?.setAttribute("value", "");
       operatorPassInputRef.current?.focus();
     }, 0);
   }
@@ -460,19 +499,15 @@ export default function TestViewer() {
   }
   // ====== fin modal pass ======
 
-  // Salir con X durante la prueba → pide pass y vuelve sin finalizar intento
   function requestExitToEvaluaciones() {
     openAskPassModal(() => {
-      // cancelar lectura si estuviera activa
       try { window.speechSynthesis?.cancel?.(); } catch {}
-      // no cerramos intento aquí (se deja abierto)
       localStorage.removeItem(storageKey);
       if (tickingRef.current) clearInterval(tickingRef.current);
       navigate("/evaluaciones");
     });
   }
 
-  // Botón "Volver" en pantalla final → pide pass y vuelve
   function backFromFinish() {
     openAskPassModal(() => {
       navigate("/evaluaciones");
@@ -485,38 +520,32 @@ export default function TestViewer() {
 
   const total = items.length;
 
-  // Si terminó de responder → pedir firma (una sola vez)
   if (!preStart && !showFinishScreen && !showSignModal && currentIndex >= total && !finishedRef.current) {
-    // en lugar de finalizar directo, pedimos firma
     requestSignature();
     return null;
   }
 
-  // Pantalla de inicio
   if (preStart) {
     return (
       <div className="focus-wrap">
         <div className="focus-card">
-          <img src="static/images/logo.png" alt="Logo" height={46} style={{ opacity: .9 }} />
           <h1 className="focus-title">Iniciar {code}</h1>
-          <p className="focus-sub">
-            {pacienteNombre ? <>Paciente: <strong>{pacienteNombre}</strong></> : "Listo para comenzar."}
-          </p>
+          {pacienteNombre && <p className="focus-sub">Paciente: <strong>{pacienteNombre}</strong></p>}
           <ul className="focus-bullets">
             <li>Se mostrará una pregunta a la vez.</li>
-            <li>No verás temporizador ni porcentaje de avance.</li>
-            <li>Puedes escuchar cada pregunta con el botón “🔊”.</li>
+            <li>Al finalizar, firmarás tu conformidad.</li>
           </ul>
           <div className="focus-actions">
             <button className="btn-start" onClick={startTest} disabled={!attemptId}>Iniciar prueba</button>
+            {/*
             <button className="btn-cancel" onClick={() => requestExitToEvaluaciones()}>Cancelar</button>
+            */}
           </div>
         </div>
       </div>
     );
   }
 
-  // Pantalla final (tras firmar)
   if (showFinishScreen) {
     return (
       <div className="finish-wrap">
@@ -531,17 +560,12 @@ export default function TestViewer() {
           </div>
         </div>
 
-        {/* Modal contraseña operador */}
         {askPassOpen && (
           <div className="exit-modal">
             <div className="modal-content" style={{ maxWidth: 420 }}>
               <h3>Confirmación del operador</h3>
               <p>Ingresa la contraseña del operador para continuar.</p>
-              <form
-                onSubmit={handleOperatorPassSubmit}
-                autoComplete="off"
-                style={{ marginTop: 10 }}
-              >
+              <form onSubmit={handleOperatorPassSubmit} autoComplete="off" style={{ marginTop: 10 }}>
                 <input
                   ref={operatorPassInputRef}
                   type="password"
@@ -568,7 +592,6 @@ export default function TestViewer() {
     );
   }
 
-  // Modal de firma (antes de finalizar)
   const pregunta = items[currentIndex];
   const opciones = pregunta?.opciones?.length ? pregunta.opciones : ["Nada", "Poco", "Algo", "Mucho"];
   const botonesDeshabilitados = savingRef.current || !attemptId;
@@ -576,15 +599,14 @@ export default function TestViewer() {
   return (
     <div className="test-topbar-container">
       <div className="test-topbar">
-        <img src="static/images/logo.png" alt="Logo" height={40} />
-        {/* sin timer ni porcentaje visibles */}
+        <div className="test-topbar-spacer" />
+        <div className="test-topbar-title">{code}</div>
         <button className="btn-exit" onClick={requestExitToEvaluaciones} title="Salir">✖</button>
       </div>
 
       <div className="test-container">
         <div className="test-header">
-          <h3 className="test-title">{code} · Pregunta {currentIndex + 1}</h3>
-          <div className="test-paciente">{pacienteNombre ? <>Paciente: <strong>{pacienteNombre}</strong></> : " "}</div>
+          <h3 className="test-title">Pregunta {currentIndex + 1}</h3>
         </div>
 
         <div className="test-question">
@@ -600,13 +622,13 @@ export default function TestViewer() {
               disabled={botonesDeshabilitados}
               title={!attemptId ? "Preparando..." : "Seleccionar"}
             >
-              {op}
+              {typeof op === "string" ? op : (op?.label ?? "Opción")}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Botón fijo para leer (sanitiza y usa voz natural si hay) */}
+      {/* Botón fijo para leer */}
       <button
         className="fab-read"
         onClick={() => speakPregunta(pregunta?.texto || "")}
@@ -616,10 +638,10 @@ export default function TestViewer() {
         🔊
       </button>
 
-      {/* Modal de firma del paciente */}
+      {/* Modal de firma */}
       {showSignModal && (
         <div className="exit-modal">
-          <div className="modal-content" style={{ maxWidth: 720 }}>
+          <div className="modal-content" style={{ maxWidth: 760 }}>
             <h3 style={{ marginTop: 0 }}>Confirmación del paciente</h3>
             <p style={{ margin: "8px 0 14px" }}>
               <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
@@ -637,14 +659,14 @@ export default function TestViewer() {
             </div>
 
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, background: "#fafafa" }}>
-              <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "180px", background: "#fff", borderRadius: 6 }} />
+              <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "200px", background: "#fff", borderRadius: 6 }} />
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8, gap: 8 }}>
                 <button className="btn-cancel-exit" onClick={clearSignature}>Limpiar</button>
               </div>
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button className="btn-cancel-exit" onClick={() => { /* no cerramos sin firmar */ }}>
+              <button className="btn-cancel-exit" onClick={() => { /* modal no se cierra sin firmar */ }}>
                 Cancelar
               </button>
               <button

@@ -102,9 +102,9 @@ export default function Sidebar() {
     return "none";
   }, [profile]);
 
+  // --- Ajuste solicitado: SOLO administrador puede ver "Pacientes"
   const isAdmin = profile?.rol === "administrador";
-  const isEncargado = profile?.rol === "operador" || profile?.rol === "encargado";
-  const canManagePatients = isAdmin || isEncargado;
+  const canManagePatients = isAdmin;
 
   return (
     <>

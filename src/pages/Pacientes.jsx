@@ -1,26 +1,58 @@
-// src/pages/Pacientes.jsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { FaPlus, FaSearch, FaFolderOpen } from "react-icons/fa";
+import { supabase } from "../lib/supabaseClient";
 import ModalPaciente from "../components/ModalPaciente";
 import ModalDocumentosPaciente from "../components/ModalDocumentosPaciente";
 import "../styles/Pacientes.css";
 
 export default function Pacientes() {
-  // Mock local: luego reemplaza por fetch a tu backend/Supabase
-  const [pacientes, setPacientes] = useState([
-    // { id:"p1", nombre:"Juan Pérez", ci:"1234567", nacimiento:"1990-10-01", genero:"M", telefono:"", email:"", direccion:"", documentos:[{id:"d1", nombre:"RX_2024.png"}] }
-  ]);
+  const [pacientes, setPacientes] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
   const [modal, setModal] = useState({ open:false, initial:null });
   const [docs, setDocs] = useState({ open:false, paciente:null });
 
+  const fetchPacientes = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("pacientes")
+      .select(`
+        id, doc_numero, doc_expedido,
+        nombres, apellidos, sexo, fecha_nacimiento,
+        contacto
+      `)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      setPacientes([]);
+    } else {
+      const mapped = (data || []).map(r => ({
+        id: r.id,
+        nombre: [r.nombres, r.apellidos].filter(Boolean).join(" "),
+        ci: r.doc_numero || "",
+        ci_ext: r.doc_expedido || "",
+        nacimiento: r.fecha_nacimiento || "",
+        genero: r.sexo || "",
+        email: r?.contacto?.email || "",
+        telefono: r?.contacto?.telefono || "",
+        direccion: r?.contacto?.direccion || "",
+        _row: r,
+      }));
+      setPacientes(mapped);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchPacientes(); }, [fetchPacientes]);
+
   const filtrados = useMemo(() => {
-    const t = q.toLowerCase();
+    const t = q.toLowerCase().trim();
     return pacientes.filter(p =>
       !t ||
-      p.nombre?.toLowerCase().includes(t) ||
-      p.ci?.toLowerCase().includes(t) ||
-      p.email?.toLowerCase().includes(t)
+      (p.nombre?.toLowerCase().includes(t)) ||
+      (p.ci?.toLowerCase().includes(t)) ||
+      (p.email?.toLowerCase().includes(t))
     );
   }, [pacientes, q]);
 
@@ -28,17 +60,12 @@ export default function Pacientes() {
   const editar = (p) => setModal({ open:true, initial:p });
   const abrirDocs = (p) => setDocs({ open:true, paciente:p });
 
-  const onGuardarPaciente = (data) => {
-    if (data.id) {
-      setPacientes(prev => prev.map(x => x.id===data.id ? data : x));
-    } else {
-      setPacientes(prev => [...prev, { ...data, id: crypto.randomUUID(), documentos: [] }]);
-    }
+  const onGuardarPaciente = async () => {
+    await fetchPacientes();
     setModal({ open:false, initial:null });
   };
 
-  const onGuardarDocs = (pacienteId, nuevosDocs) => {
-    setPacientes(prev => prev.map(p => p.id===pacienteId ? { ...p, documentos: nuevosDocs } : p));
+  const onGuardarDocs = async () => {
     setDocs({ open:false, paciente:null });
   };
 
@@ -46,9 +73,16 @@ export default function Pacientes() {
     <div className="pacientes-page">
       <div className="pacientes-header">
         <div className="search">
-          <FaSearch /><input placeholder="Buscar por nombre, CI o email…" value={q} onChange={(e)=>setQ(e.target.value)} />
+          <FaSearch />
+          <input
+            placeholder="Buscar por nombre, CI o email…"
+            value={q}
+            onChange={(e)=>setQ(e.target.value)}
+          />
         </div>
-        <button className="btn-primary" onClick={crear}><FaPlus/> Nuevo paciente</button>
+        <button className="btn-primary" onClick={crear}>
+          <FaPlus/> Nuevo paciente
+        </button>
       </div>
 
       <div className="card">
@@ -65,16 +99,19 @@ export default function Pacientes() {
             </tr>
           </thead>
           <tbody>
-            {filtrados.length===0 && (
+            {loading && (
+              <tr><td colSpan={7} className="muted">Cargando…</td></tr>
+            )}
+            {!loading && filtrados.length===0 && (
               <tr><td colSpan={7} className="muted">Sin pacientes</td></tr>
             )}
-            {filtrados.map(p=>(
+            {!loading && filtrados.map(p=>(
               <tr key={p.id}>
-                <td>{p.nombre}</td>
-                <td>{p.ci || "—"}</td>
+                <td>{p.nombre || "—"}</td>
+                <td>{p.ci ? `${p.ci} ${p.ci_ext || ""}` : "—"}</td>
                 <td>{p.nacimiento || "—"}</td>
                 <td>{p.genero || "—"}</td>
-                <td>{p.email || p.telefono || "—"}</td>
+                <td>{p.telefono || "—"}</td>
                 <td>
                   <button className="btn-light" onClick={()=>abrirDocs(p)}>
                     <FaFolderOpen/><span> Abrir</span>
@@ -93,7 +130,7 @@ export default function Pacientes() {
         <ModalPaciente
           initial={modal.initial}
           onClose={()=>setModal({open:false, initial:null})}
-          onSave={onGuardarPaciente}
+          onSaved={onGuardarPaciente}
         />
       )}
 
@@ -101,7 +138,7 @@ export default function Pacientes() {
         <ModalDocumentosPaciente
           paciente={docs.paciente}
           onClose={()=>setDocs({open:false, paciente:null})}
-          onSave={onGuardarDocs}
+          onSaved={onGuardarDocs}
         />
       )}
     </div>

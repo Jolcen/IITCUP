@@ -1,69 +1,198 @@
-import "../styles/ModalEvaluacion.css";
-
 // src/components/ModalEvaluacion.jsx
+import "../styles/ModalEvaluacion.css";
 import { useEffect, useMemo, useState } from "react";
-import { FaTimes, FaDownload, FaFileAlt, FaCalendarAlt, FaUserCircle } from "react-icons/fa";
+import { FaTimes, FaDownload, FaFileAlt, FaUserCircle } from "react-icons/fa";
+import { supabase } from "../lib/supabaseClient";
+import ModalSelectPaciente from "./ModalSelectPaciente";
 
 /**
  * Props:
  * - mode: "create" | "edit" | "view"
- * - initialCase: objeto del caso (puede venir incompleto en la tabla; en openView/openEdit ya haces un select "*")
+ * - initialCase: objeto del caso
  * - onClose: () => void
- * - onSaved: () => void   // refrescar tabla después de guardar
- *
- * Notas:
- * - FRONTEND ONLY: no toca Supabase. Simula guardado con setTimeout y llama onSaved().
- * - En modo "view" renderiza panel lateral con ficha del paciente y documentos.
+ * - onSaved: () => void
  */
 export default function ModalEvaluacion({ mode = "view", initialCase, onClose, onSaved }) {
   const isView = mode === "view";
   const isCreate = mode === "create";
   const isEdit = mode === "edit";
 
-  // ---------- CASE MODEL (frontend) ----------
-  const [form, setForm] = useState({
-    id: initialCase?.id ?? null,
-    paciente_id: initialCase?.paciente_id ?? null,
-    paciente_nombre: initialCase?.paciente_nombre ?? "",
-    paciente_ci: initialCase?.paciente_ci ?? "",
-    motivacion: initialCase?.motivacion ?? "",
-    estado: initialCase?.estado ?? "pendiente", // pendiente | en_evaluacion | evaluado
-    creado_en: initialCase?.creado_en ?? new Date().toISOString(),
-    // “agenda” sin paciente
-    fecha_programada: initialCase?.fecha_programada ?? "", // ej. "2026-05-21"
-    hora_programada: initialCase?.hora_programada ?? "",   // ej. "15:30"
-  });
+  const [motivacion, setMotivacion] = useState(initialCase?.motivacion ?? "");
+  const [pacienteId, setPacienteId] = useState(initialCase?.paciente_id ?? null);
+  const [paciente, setPaciente] = useState(null); // {id, nombre, ci}
 
-  // Documentos del paciente (solo lectura aquí).
-  // Espera que vengan colgados en initialCase.paciente_documentos (array) si los inyectas al abrir el modal.
-  // Si no vienen, muestra vacío.
-  const documentos = useMemo(() => {
-    return Array.isArray(initialCase?.paciente_documentos)
-      ? initialCase.paciente_documentos
-      : [];
-  }, [initialCase]);
+  // catálogos
+  const [operadores, setOperadores] = useState([]);
+  const [asignadoA, setAsignadoA] = useState(initialCase?.asignado_a ?? "");
+  const [pruebas, setPruebas] = useState([]);
+  const [selPruebas, setSelPruebas] = useState([]); // uuid[]
 
-  const set = (k, v) => setForm((prev) => ({ ...prev, [k]: v }));
+  // anexos / preview
+  const [docs, setDocs] = useState([]);
+  const [preview, setPreview] = useState({ open:false, url:"", name:"", mime:"" });
 
-  // ---------- SAVE (frontend only) ----------
-  const guardar = () => {
-    // Validaciones mínimas al crear/editar (no obligamos paciente por requerimiento)
-    // Puedes agregar más validaciones según tu flujo real.
-    // Simulamos operación asíncrona:
-    setTimeout(() => {
-      onSaved?.();
-      onClose?.();
-    }, 250);
+  // pruebas del caso (para view y preselección en edit)
+  const [caseTests, setCaseTests] = useState([]); // [{prueba_id, estado, nombre}]
+
+  const [pickPatientOpen, setPickPatientOpen] = useState(false);
+
+  // catálogos
+  useEffect(() => {
+    (async () => {
+      if (isCreate || isEdit) {
+        const { data: op } = await supabase
+          .from("app_users")
+          .select("id,nombre,rol,estado,deleted_at")
+          .eq("rol","operador")
+          .eq("estado","disponible")
+          .is("deleted_at", null)
+          .order("nombre");
+        setOperadores(op || []);
+
+        const { data: pr } = await supabase.from("pruebas").select("id,nombre").order("nombre");
+        setPruebas(pr || []);
+      }
+    })();
+  }, [isCreate, isEdit]);
+
+  // paciente
+  useEffect(() => {
+    (async () => {
+      if (!pacienteId) { setPaciente(null); return; }
+      const { data } = await supabase
+        .from("pacientes")
+        .select("id, doc_numero, nombres, apellidos")
+        .eq("id", pacienteId)
+        .maybeSingle();
+      if (data) setPaciente({ id: data.id, nombre: `${data.nombres ?? ""} ${data.apellidos ?? ""}`.trim(), ci: data.doc_numero || "" });
+    })();
+  }, [pacienteId]);
+
+  // anexos
+  useEffect(() => {
+    (async () => {
+      if (!isView || !initialCase?.paciente_id) { setDocs([]); return; }
+      const { data } = await supabase
+        .from("anexos")
+        .select("id, titulo, path, bucket, mime_type")
+        .or(`paciente_id.eq.${initialCase.paciente_id},caso_id.eq.${initialCase.id}`)
+        .order("created_at", { ascending: false });
+      setDocs(data || []);
+    })();
+  }, [isView, initialCase?.paciente_id, initialCase?.id]);
+
+  // pruebas del caso (y preselección en edit)
+// pruebas del caso (y preselección en edit) — robusto si no hay FK
+  useEffect(() => {
+    (async () => {
+      if (!initialCase?.id) { setCaseTests([]); return; }
+
+      // 1) Traigo los ids de pruebas asignadas
+      const { data: cp, error } = await supabase
+        .from("casos_pruebas")
+        .select("prueba_id, estado, orden")
+        .eq("caso_id", initialCase.id)
+        .order("orden", { ascending: true });
+
+      if (error) { console.error(error); setCaseTests([]); return; }
+      const ids = (cp || []).map(r => r.prueba_id);
+
+      // 2) Traigo nombres en un solo roundtrip
+      let namesById = {};
+      if (ids.length) {
+        const { data: pr, error: e2 } = await supabase
+          .from("pruebas")
+          .select("id, nombre")
+          .in("id", ids);
+        if (!e2 && pr) {
+          namesById = Object.fromEntries(pr.map(p => [p.id, p.nombre]));
+        }
+      }
+
+      const arr = (cp || []).map(r => ({
+        prueba_id: r.prueba_id,
+        estado: r.estado,
+        nombre: namesById[r.prueba_id] || ""
+      }));
+      setCaseTests(arr);
+
+      if (isEdit) setSelPruebas(ids); // <-- preselecciona en EDIT
+    })();
+  }, [initialCase?.id, isEdit]);
+
+
+  // helpers preview
+  const openPreview = async (d) => {
+    const { data, error } = await supabase.storage.from(d.bucket).createSignedUrl(d.path, 120);
+    if (error) { alert(error.message); return; }
+    setPreview({ open:true, url: data.signedUrl, name: d.titulo || d.path, mime: d.mime_type || "" });
+  };
+  const closePreview = () => setPreview({ open:false, url:"", name:"", mime:"" });
+  const downloadDoc = async (d) => {
+    const { data, error } = await supabase.storage.from(d.bucket).createSignedUrl(d.path, 60);
+    if (error) { alert(error.message); return; }
+    window.open(data.signedUrl, "_blank");
   };
 
-  // Helpers
+  const guardar = async () => {
+    if (isCreate) {
+      const { error } = await supabase.rpc("create_caso_con_pruebas", {
+        p_paciente_id: pacienteId,
+        p_asignado_a: asignadoA || null,
+        p_motivacion: motivacion || null,
+        p_pruebas: selPruebas
+      });
+      if (error) { alert(error.message); return; }
+    } else {
+      const { error } = await supabase
+        .from("casos")
+        .update({ motivacion, asignado_a: asignadoA || null, paciente_id: pacienteId || null })
+        .eq("id", initialCase.id);
+      if (error) { alert(error.message); return; }
+
+      // sincroniza pruebas del caso
+      const { data: existing } = await supabase
+        .from("casos_pruebas")
+        .select("prueba_id, orden")
+        .eq("caso_id", initialCase.id);
+
+      const ex = new Set((existing || []).map(r => r.prueba_id));
+      const sel = new Set(selPruebas);
+
+      const toAdd = [...sel].filter(id => !ex.has(id));
+      const toRemove = [...ex].filter(id => !sel.has(id));
+
+      if (toAdd.length) {
+        const start = (existing || []).length;
+        const rows = toAdd.map((id, i) => ({
+          caso_id: initialCase.id,
+          prueba_id: id,
+          estado: "pendiente",
+          orden: start + i + 1
+        }));
+        const { error: eAdd } = await supabase.from("casos_pruebas").insert(rows);
+        if (eAdd) { alert(eAdd.message); return; }
+      }
+      if (toRemove.length) {
+        const { error: eDel } = await supabase
+          .from("casos_pruebas")
+          .delete()
+          .in("prueba_id", toRemove)
+          .eq("caso_id", initialCase.id);
+        if (eDel) { alert(eDel.message); return; }
+      }
+    }
+    onSaved?.();
+    onClose?.();
+  };
+
   const fmtFecha = (iso) => {
     try { return new Date(iso).toLocaleString(); } catch { return iso || "—"; }
   };
 
   return (
     <div className="mb-backdrop" onClick={onClose}>
-      <div className="mb-modal" style={{ width: 960, maxWidth: "94vw" }} onClick={(e) => e.stopPropagation()}>
+      <div className="mb-modal" style={{ width: 980, maxWidth: "94vw" }} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="mb-header">
           <h3>
@@ -71,138 +200,139 @@ export default function ModalEvaluacion({ mode = "view", initialCase, onClose, o
             {isEdit && "Editar evaluación"}
             {isView && "Detalle de evaluación"}
           </h3>
-          <button className="mb-close" onClick={onClose} aria-label="Cerrar">
-            <FaTimes />
-          </button>
+          <button className="mb-close" onClick={onClose} aria-label="Cerrar"><FaTimes /></button>
         </div>
 
         {/* Body */}
         <div className="mb-body" style={{ display: "grid", gridTemplateColumns: isView ? "2fr 1fr" : "1fr", gap: 16 }}>
-          {/* Columna izquierda: datos del caso */}
+          {/* Col izquierda: datos del caso */}
           <div className="case-col">
-            {/* Datos principales */}
-            {!isView && (
+            {(isCreate || isEdit) && (
               <div className="panel">
                 <h4>Datos del caso</h4>
+
+                <label>
+                  Motivo / Contexto
+                  <textarea rows={4} value={motivacion} onChange={(e) => setMotivacion(e.target.value)} />
+                </label>
+
                 <div className="grid2">
                   <label>
-                    Motivo / Contexto
-                    <textarea
-                      rows={4}
-                      value={form.motivacion}
-                      onChange={(e) => set("motivacion", e.target.value)}
-                    />
-                  </label>
-
-                  <label>
-                    Estado
-                    <select value={form.estado} onChange={(e) => set("estado", e.target.value)}>
-                      <option value="pendiente">Pendiente</option>
-                      <option value="en_evaluacion">En evaluación</option>
-                      <option value="evaluado">Evaluado</option>
+                    Operador (opcional)
+                    <select value={asignadoA || ""} onChange={(e)=> setAsignadoA(e.target.value || "")}>
+                      <option value="">— Sin asignar (queda pendiente)</option>
+                      {operadores.map(o => <option key={o.id} value={o.id}>{o.nombre}</option>)}
                     </select>
                   </label>
 
                   <label>
-                    Fecha programada (opcional)
-                    <input
-                      type="date"
-                      value={form.fecha_programada}
-                      onChange={(e) => set("fecha_programada", e.target.value)}
-                    />
-                  </label>
-
-                  <label>
-                    Hora programada (opcional)
-                    <input
-                      type="time"
-                      value={form.hora_programada}
-                      onChange={(e) => set("hora_programada", e.target.value)}
-                    />
+                    Paciente (opcional)
+                    <div style={{ display:"flex", gap:8 }}>
+                      <input disabled value={paciente ? `${paciente.nombre} (CI: ${paciente.ci||"—"})` : ""} placeholder="Sin paciente" />
+                      <button type="button" className="btn-light" onClick={()=>setPickPatientOpen(true)}>Buscar</button>
+                      {paciente && (
+                        <button type="button" className="btn-light" onClick={()=>setPacienteId(null)}>Quitar</button>
+                      )}
+                    </div>
                   </label>
                 </div>
-                <p className="hint">
-                  <FaCalendarAlt style={{ marginRight: 6 }} />
-                  Puedes <strong>agendar</strong> la evaluación sin un paciente asignado. Luego
-                  podrás asignarlo desde la lista de evaluaciones.
-                </p>
+
+                <label className="label-pills">
+                  Pruebas a aplicar
+                  <div className="pills">
+                    {pruebas.map(p => {
+                      const active = selPruebas.includes(p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className={`pill ${active ? "pill--active" : ""}`}
+                          onClick={() => {
+                            setSelPruebas(prev =>
+                              prev.includes(p.id) ? prev.filter(id => id !== p.id) : [...prev, p.id]
+                            );
+                          }}
+                          aria-pressed={active}
+                        >
+                          {p.nombre}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <small className="hint">Haz clic para seleccionar o deseleccionar.</small>
+                </label>
               </div>
             )}
 
             {isView && (
-              <div className="panel">
-                <h4>Resumen del caso</h4>
-                <div className="kv">
-                  <span className="k">Motivo/Contexto</span>
-                  <span className="v">{initialCase?.motivacion || "—"}</span>
-                </div>
-                <div className="kv">
-                  <span className="k">Estado</span>
-                  <span className="v">
+              <>
+                <div className="panel">
+                  <h4>Resumen del caso</h4>
+                  <div className="kv"><span className="k">Motivo/Contexto</span><span className="v">{initialCase?.motivacion || "—"}</span></div>
+                  <div className="kv"><span className="k">Estado</span><span className="v">
                     <span className={`chip chip-${initialCase?.estado || "pendiente"}`}>
                       {initialCase?.estado === "pendiente" && "Pendiente"}
-                      {initialCase?.estado === "en_evaluacion" && "En evaluación"}
-                      {initialCase?.estado === "evaluado" && "Evaluado"}
-                      {!["pendiente","en_evaluacion","evaluado"].includes(initialCase?.estado) && (initialCase?.estado || "pendiente")}
+                      {initialCase?.estado === "asignado" && "Asignado"}
+                      {initialCase?.estado === "en_progreso" && "En progreso"}
+                      {initialCase?.estado === "completada" && "Completada"}
+                      {initialCase?.estado === "cancelado" && "Cancelado"}
                     </span>
-                  </span>
-                </div>
-                <div className="kv">
-                  <span className="k">Creado</span>
-                  <span className="v">{fmtFecha(initialCase?.creado_en)}</span>
+                  </span></div>
+                  <div className="kv"><span className="k">Creado</span><span className="v">{fmtFecha(initialCase?.creado_en)}</span></div>
                 </div>
 
-                {(initialCase?.fecha_programada || initialCase?.hora_programada) && (
-                  <div className="kv">
-                    <span className="k">Agendado</span>
-                    <span className="v">
-                      {initialCase?.fecha_programada || "—"} {initialCase?.hora_programada || ""}
-                    </span>
-                  </div>
-                )}
-              </div>
+                <div className="panel" style={{ marginTop: 12 }}>
+                  <h4>Pruebas asignadas</h4>
+                  {caseTests.length === 0 ? (
+                    <p className="muted" style={{ margin: 0 }}>Sin pruebas asignadas</p>
+                  ) : (
+                    <ul className="test-list">
+                      {caseTests.map(t => (
+                        <li key={t.prueba_id}>
+                          <span className="test-name">{t.nombre}</span>
+                          <span className={`chip chip-${t.estado}`}>
+                            {t.estado === "pendiente" && "Pendiente"}
+                            {t.estado === "completada" && "Completada"}
+                            {t.estado === "omitida" && "Omitida"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
             )}
-
-            {/* (Aquí podrías renderizar más secciones del caso, pruebas asignadas, etc.) */}
           </div>
 
-          {/* Columna derecha: PACIENTE + DOCUMENTOS (solo view) */}
+          {/* Col derecha: paciente + documentos */}
           {isView && (
             <aside className="patient-col">
               <div className="panel">
                 <h4>Paciente</h4>
 
-                {!initialCase?.paciente_id && (
-                  <p className="muted" style={{ margin: 0 }}>
-                    Este caso aún no tiene paciente asignado.
-                  </p>
-                )}
+                {!initialCase?.paciente_id && <p className="muted" style={{ margin: 0 }}>Este caso aún no tiene paciente asignado.</p>}
 
                 {initialCase?.paciente_id && (
                   <>
                     <div className="patient-card">
-                      <div className="icon">
-                        <FaUserCircle />
-                      </div>
+                      <div className="icon"><FaUserCircle /></div>
                       <div className="meta">
-                        <div className="name">{initialCase?.paciente_nombre || "—"}</div>
-                        <div className="ci">CI: {initialCase?.paciente_ci || "—"}</div>
+                        <div className="name">{paciente?.nombre || "—"}</div>
+                        <div className="ci">CI: {paciente?.ci || "—"}</div>
                       </div>
                     </div>
 
-                    {/* Documentos del paciente */}
                     <h5 style={{ margin: "14px 0 8px" }}>Documentos</h5>
                     <ul className="doc-list">
-                      {documentos.length === 0 && <li className="muted">Sin documentos</li>}
-                      {documentos.map((d) => (
+                      {docs.length === 0 && <li className="muted">Sin documentos</li>}
+                      {docs.map((d) => (
                         <li key={d.id}>
-                          <div className="doc-left">
+                          <button className="doc-left as-link" onClick={() => openPreview(d)} title="Ver">
                             <FaFileAlt />
-                            <span className="doc-name" title={d.nombre}>{d.nombre}</span>
-                          </div>
+                            <span className="doc-name" title={d.titulo || d.path}>{d.titulo || d.path}</span>
+                          </button>
                           <div className="doc-actions">
-                            {/* En backend real: href al archivo / preview */}
-                            <button className="btn-light" title="Descargar">
+                            <button className="btn-light" title="Descargar" onClick={() => downloadDoc(d)}>
                               <FaDownload />
                             </button>
                           </div>
@@ -219,13 +349,40 @@ export default function ModalEvaluacion({ mode = "view", initialCase, onClose, o
         {/* Footer */}
         <div className="mb-footer">
           <button className="btn-light" onClick={onClose}>Cerrar</button>
-          {(isCreate || isEdit) && (
-            <button className="btn-primary" onClick={guardar}>
-              Guardar
-            </button>
-          )}
+          {(isCreate || isEdit) && <button className="btn-primary" onClick={guardar}>Guardar</button>}
         </div>
       </div>
+
+      {pickPatientOpen && (
+        <ModalSelectPaciente
+          pacientes={[]}
+          onClose={()=>setPickPatientOpen(false)}
+          onSelect={(id)=>{ setPacienteId(id); setPickPatientOpen(false); }}
+        />
+      )}
+
+      {/* Preview modal */}
+      {preview.open && (
+        <div className="mb-backdrop" onClick={closePreview}>
+          <div className="mb-modal" style={{ width: "min(900px, 94vw)" }} onClick={(e)=>e.stopPropagation()}>
+            <div className="mb-header">
+              <h3>Vista previa: {preview.name}</h3>
+              <button className="mb-close" onClick={closePreview}>×</button>
+            </div>
+
+            {/* ⬇⬇⬇ cambia 'mb-body' por 'mb-body preview-body' */}
+            <div className="mb-body preview-body">
+              {(preview.mime?.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(preview.name)) ? (
+                <img src={preview.url} alt={preview.name} />
+              ) : (preview.mime === "application/pdf" || /\.pdf$/i.test(preview.name)) ? (
+                <iframe src={preview.url} title="preview" />
+              ) : (
+                <p className="muted">No hay vista previa para este tipo de archivo. Usa el botón de descarga.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
