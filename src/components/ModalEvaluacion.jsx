@@ -294,6 +294,7 @@ export default function ModalEvaluacion({ mode = "view", initialCase, onClose, o
                             {t.estado === "pendiente" && "Pendiente"}
                             {t.estado === "completada" && "Completada"}
                             {t.estado === "omitida" && "Omitida"}
+                            {t.estado === "interrumpido" && "Interrumpido"}
                           </span>
                         </li>
                       ))}

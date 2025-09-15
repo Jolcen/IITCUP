@@ -180,6 +180,7 @@ textarea{ resize:vertical; }
 .chip-en_progreso { background:#ecfeff; color:#155e75; border:1px solid #67e8f9; }
 .chip-completada  { background:#ecfdf5; color:#166534; border:1px solid #86efac; }
 .chip-cancelado   { background:#fef2f2; color:#991b1b; border:1px solid #fecaca; }
+.chip-interrumpido{ background:#fef2f2; color:#991b1b; border:1px solid #fecaca; }
 
 /* Pills de selección */
 .label-pills{ display:flex; flex-direction:column; gap:8px; }

@@ -4,8 +4,9 @@ import { supabase } from "../lib/supabaseClient";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import "../styles/ModalResultados.css";
-import { generarPDF_PAI } from "../pdf/ReportePAI";  // ⬅️ generador PDF PAI
+import { generarPDF_PAI } from "../pdf/ReportePAI";  // ⬅️ generador PDF PAI (ya lo tenías)
 import { getCurrentUserRole, canGenerateProfile } from "../lib/roles";
+import { jsPDF } from "jspdf"; // ⬅️ NUEVO: para exportar PDF del perfil (npm i jspdf)
 
 // Plantilla Excel empaquetada por Vite (PAI)
 import PAI_TEMPLATE_URL from "../assets/templates/Hoja-de-calculo-para-PAI-vacio.xlsx?url";
@@ -18,6 +19,19 @@ const PRUEBA_IMG = {
   "MMPI-2": "static/images/mmpi-2.jpg",
   DEFAULT: "static/images/testP.jpg",
 };
+
+// ===== Clases (map según tu documento) =====
+const CLASES = [
+  "No_clínico",
+  "Ansiedad",
+  "Depresivo",
+  "Uso de Sustancias",
+  "Antisocial",
+  "Paranoide",
+  "Psicótico/Esquizofrenia",
+  "Bipolar",
+  "Límite",
+];
 
 // ====== Mapeos de escalas PAI para armar el JSON ======
 const CODES_CLINICAS = ["SOM","ANS","TRA","DEP","MAN","PAR","ESQ","LIM","ANT","ALC","DRG"];
@@ -55,6 +69,91 @@ export default function ModalResultados({ open, onClose, caso }) {
   const [puntajesLoading, setPuntajesLoading] = useState(false);
 
   const [showPerfil, setShowPerfil] = useState(false);
+
+  // NUEVO: modal del generador de perfil (siempre habilitado)
+  const [showGen, setShowGen] = useState(false);
+  const [prediccion, setPrediccion] = useState(null);
+  const [probs, setProbs] = useState([]);
+
+  // ===== util: simulación local del perfil =====
+  function simularPerfil() {
+    // Probabilidades de ejemplo (suman 1). Ajusta si quieres otro patrón.
+    // Genera una distribución suave y elige top-3 para mostrar.
+    const rnd = CLASES.map(() => Math.random() ** 2); // sesgo a valores pequeños
+    const sum = rnd.reduce((a, b) => a + b, 0) || 1;
+    const p = rnd.map(v => v / sum);
+
+    // Top-1 como clase final
+    let bestIdx = 0;
+    p.forEach((v, i) => { if (v > p[bestIdx]) bestIdx = i; });
+
+    return {
+      clase: CLASES[bestIdx],
+      probs: p.map((v, i) => ({ clase: CLASES[i], p: v })),
+    };
+  }
+
+  function abrirGeneradorPerfil() {
+    const { clase, probs } = simularPerfil();
+    // Ordenar de mayor a menor para mostrar top-3
+    const sorted = [...probs].sort((a, b) => b.p - a.p);
+    setPrediccion({ clase, top3: sorted.slice(0, 3) });
+    setProbs(sorted);
+    setShowGen(true);
+  }
+
+  function exportarPDFPerfil() {
+    if (!prediccion) return;
+    const doc = new jsPDF({ unit: "pt" });
+    const pad = 48;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("Informe de Perfil Criminológico", pad, 60);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    const fecha = new Date().toLocaleString();
+    doc.text(`Fecha: ${fecha}`, pad, 82);
+    doc.text(`Paciente: ${caso?.paciente_nombre || "—"}`, pad, 98);
+    doc.text(`CI: ${caso?.paciente_ci || "—"}`, pad, 114);
+
+    // Resultado principal
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text("Resultado principal", pad, 150);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(12);
+    doc.text(`Clasificación: ${prediccion.clase}`, pad, 170);
+
+    // Tabla top-3
+    doc.setFont("helvetica", "bold");
+    doc.text("Top-3 probabilidades", pad, 204);
+    doc.setFont("helvetica", "normal");
+    const startY = 224;
+    const rowH = 18;
+    doc.text("Clase", pad, startY);
+    doc.text("Probabilidad", pad + 280, startY);
+
+    prediccion.top3.forEach((r, idx) => {
+      const y = startY + rowH * (idx + 1);
+      doc.text(r.clase, pad, y);
+      doc.text(`${(r.p * 100).toFixed(2)} %`, pad + 280, y);
+    });
+
+    // Nota
+    const noteY = startY + rowH * (prediccion.top3.length + 2);
+    doc.setFontSize(10);
+    doc.text(
+      "Nota: este reporte fue generado desde el módulo de integración. Sustituir con la inferencia real cuando esté disponible.",
+      pad,
+      noteY,
+      { maxWidth: 500 }
+    );
+
+    const nombre = `Perfil_${(caso?.paciente_ci || "caso")}.pdf`;
+    doc.save(nombre);
+  }
 
   // Carga rol + pruebas + últimos intentos terminados
   useEffect(() => {
@@ -224,11 +323,11 @@ export default function ModalResultados({ open, onClose, caso }) {
       return;
     }
     if (!puntajes || puntajes.length === 0) {
-      alert("No hay puntajes calculados para este intento.");
+      alert("No hay puntajes calculados para esta prueba.");
       return;
     }
     const json = buildPaiJson(caso, puntajes);
-    generarPDF_PAI(json); // ⬅️ genera y descarga el PDF
+    generarPDF_PAI(json); // ⬅️ genera y descarga el PDF PAI
   };
 
   // ================== RENDER ==================
@@ -277,11 +376,10 @@ export default function ModalResultados({ open, onClose, caso }) {
           </div>
         )}
 
-        <div className="mr-actions">
+        <div className="mr-actions" style={{ gap: 8 }}>
+          {/* Botón clásico (tu RPC). Lo dejo, pero puedes ocultarlo si quieres */}
           <button
-            className={
-              allReady && canGenerateProfile(rol) ? "btn-primary mr-btn" : "btn-soft mr-btn mr-btn--disabled"
-            }
+            className={allReady && canGenerateProfile(rol) ? "btn-primary mr-btn" : "btn-soft mr-btn mr-btn--disabled"}
             disabled={!allReady || !canGenerateProfile(rol)}
             onClick={async () => {
               try {
@@ -301,14 +399,24 @@ export default function ModalResultados({ open, onClose, caso }) {
               !canGenerateProfile(rol)
                 ? "Tu rol no puede generar perfiles (solo ver/exportar)"
                 : allReady
-                  ? "Generar perfil"
+                  ? "Generar perfil (backend)"
                   : "Completa PAI + MMPI-2 + MCMI-IV para habilitar"
             }
+          >
+            Generar perfil (backend)
+          </button>
+
+          {/* NUEVO: SIEMPRE HABILITADO */}
+          <button
+            className="btn-primary mr-btn"
+            onClick={abrirGeneradorPerfil}
+            title="Generar perfil (simulado local)"
           >
             Generar perfil
           </button>
         </div>
 
+        {/* Detalle por prueba */}
         {showDetalle && (
           <div
             className="modal-overlay nested"
@@ -362,6 +470,58 @@ export default function ModalResultados({ open, onClose, caso }) {
           </div>
         )}
 
+        {/* Modal del perfil generado (siempre habilitado) */}
+        {showGen && (
+          <div
+            className="modal-overlay nested"
+            onMouseDown={(e) => { if (e.target.classList.contains("modal-overlay")) setShowGen(false); }}
+          >
+            <div className="modal result-modal" onMouseDown={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <h3>Generación de perfil</h3>
+                <button className="close" onClick={() => setShowGen(false)}>✕</button>
+              </div>
+
+              <div className="result-body">
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Paciente: <strong>{caso?.paciente_nombre || "—"}</strong> · CI{" "}
+                  <strong>{caso?.paciente_ci || "—"}</strong>
+                </p>
+
+                <div className="card" style={{ marginTop: 6 }}>
+                  <p className="muted" style={{ margin: 0 }}>Resultado principal</p>
+                  <h2 style={{ margin: "6px 0 4px" }}>{prediccion?.clase || "—"}</h2>
+                </div>
+
+                <div className="card" style={{ marginTop: 10 }}>
+                  <p className="muted" style={{ margin: 0 }}>Top-3 probabilidades</p>
+                  <table className="table-mini" style={{ width: "100%", marginTop: 6 }}>
+                    <thead><tr><th>Clase</th><th>Prob.</th></tr></thead>
+                    <tbody>
+                      {prediccion?.top3?.map((r, i) => (
+                        <tr key={i}>
+                          <td>{r.clase}</td>
+                          <td>{(r.p * 100).toFixed(2)} %</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="result-actions">
+                <button className="btn-soft" onClick={exportarPDFPerfil}>
+                  📄 Exportar PDF
+                </button>
+                <button className="btn-cancel-exit" onClick={() => setShowGen(false)}>
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de perfil generado por backend (tu flujo actual) */}
         {showPerfil && (
           <div
             className="modal-overlay nested"
