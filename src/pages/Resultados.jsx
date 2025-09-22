@@ -1,4 +1,3 @@
-// src/pages/Resultados.jsx
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import "../styles/Resultados.css";
@@ -7,7 +6,6 @@ import ModalResultados from "../components/ModalResultados";
 const PAGE_SIZE = 10;
 
 export default function Resultados() {
-  // lista de casos con pruebas finalizadas
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -15,6 +13,7 @@ export default function Resultados() {
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const [total, setTotal] = useState(0);
+
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
   const pages = useMemo(() => {
     const max = 5, start = Math.max(1, page - Math.floor(max / 2));
@@ -22,7 +21,7 @@ export default function Resultados() {
     return Array.from({ length: end - start + 1 }, (_, i) => start + i);
   }, [page, totalPages]);
 
-  // modal de pruebas por caso
+  // modal
   const [openPruebas, setOpenPruebas] = useState(false);
   const [caseForPruebas, setCaseForPruebas] = useState(null);
 
@@ -30,84 +29,31 @@ export default function Resultados() {
     let alive = true;
     (async () => {
       setLoading(true);
+      try {
+        // lista
+        const { data: list, error: e1 } = await supabase.rpc("api_resultados_listar", {
+          p_term: q?.trim() ? q : null,
+          p_page: page,
+          p_page_size: PAGE_SIZE,
+        });
+        if (e1) throw e1;
 
-      // 1) obtener todos los intentos finalizados → caseIds
-      const { data: fin, error: e1 } = await supabase
-        .from("intentos_prueba")
-        .select("caso_id, id")
-        .not("terminado_en", "is", null);
+        // total
+        const { data: totalCount, error: e2 } = await supabase.rpc("api_resultados_total", {
+          p_term: q?.trim() ? q : null,
+        });
+        if (e2) throw e2;
 
-      if (e1) {
-        console.error(e1);
-        if (alive) { setRows([]); setTotal(0); setLoading(false); }
-        return;
+        if (!alive) return;
+        setRows(list || []);
+        setTotal(Number(totalCount || 0));
+      } catch (err) {
+        console.error(err);
+        if (!alive) return;
+        setRows([]); setTotal(0);
+      } finally {
+        if (alive) setLoading(false);
       }
-
-      const caseIds = Array.from(new Set((fin || []).map(r => r.caso_id))).filter(Boolean);
-
-      // 2) filtrar por búsqueda con join a pacientes
-      let filteredCaseIds = caseIds;
-      if (q.trim()) {
-        const { data: allCases } = await supabase
-          .from("casos")
-          .select(`
-            id, paciente_id, motivacion,
-            pacientes:paciente_id (nombres, apellidos, doc_numero)
-          `)
-          .in("id", caseIds);
-
-        const term = q.toLowerCase();
-        filteredCaseIds = (allCases || [])
-          .filter(c => {
-            const nombre = `${c?.pacientes?.nombres || ""} ${c?.pacientes?.apellidos || ""}`.trim();
-            const ci = c?.pacientes?.doc_numero || "";
-            return (
-              nombre.toLowerCase().includes(term) ||
-              ci.toLowerCase().includes(term) ||
-              (c.motivacion || "").toLowerCase().includes(term)
-            );
-          })
-          .map(c => c.id);
-      }
-
-      const totalCount = filteredCaseIds.length;
-
-      // 3) traer página de casos con join a pacientes
-      const from = (page - 1) * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
-      const pageIds = filteredCaseIds.slice(from, to + 1);
-
-      let list = [];
-      if (pageIds.length > 0) {
-        const { data: casos, error: e2 } = await supabase
-          .from("casos")
-          .select(`
-            id, paciente_id, motivacion, creado_en,
-            pacientes:paciente_id (nombres, apellidos, doc_numero)
-          `)
-          .in("id", pageIds);
-
-        if (e2) {
-          console.error(e2);
-        } else {
-          const map = new Map(
-            (casos || []).map(c => [
-              c.id,
-              {
-                ...c,
-                paciente_nombre: `${c?.pacientes?.nombres || ""} ${c?.pacientes?.apellidos || ""}`.trim(),
-                paciente_ci: c?.pacientes?.doc_numero || null,
-              },
-            ])
-          );
-          list = pageIds.map(id => map.get(id)).filter(Boolean);
-        }
-      }
-
-      if (!alive) return;
-      setRows(list);
-      setTotal(totalCount);
-      setLoading(false);
     })();
     return () => { alive = false; };
   }, [page, q]);
@@ -178,7 +124,7 @@ export default function Resultados() {
         </div>
       </div>
 
-      {/* MODAL: Pruebas finalizadas del caso → dentro uso ModalResultados para ver/generar */}
+      {/* Modal de pruebas */}
       {openPruebas && caseForPruebas && (
         <div className="exit-modal">
           <div className="modal-content" style={{ maxWidth: 860 }}>
@@ -195,7 +141,6 @@ export default function Resultados() {
               &nbsp; <small>CI: {caseForPruebas.paciente_ci || "—"}</small>
             </p>
 
-            {/* Reuso el modal de resultados para detalle + perfil */}
             <ModalResultados
               open={true}
               onClose={() => { setOpenPruebas(false); setCaseForPruebas(null); }}

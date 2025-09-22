@@ -1,4 +1,3 @@
-// src/pages/Evaluaciones.jsx
 import "../styles/Evaluaciones.css";
 import { FaUserCircle, FaEdit, FaTrash, FaPlay, FaSearch, FaEye, FaUserPlus } from "react-icons/fa";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
@@ -44,7 +43,7 @@ export default function Evaluaciones() {
   const [total, setTotal] = useState(0);
 
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState("todos"); // todos | pendiente | asignado | en_progreso | completada | cancelado
+  const [status, setStatus] = useState("todos"); // todos | pendiente | asignado | en_progreso | completada | cancelada
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -161,7 +160,7 @@ export default function Evaluaciones() {
       {s === "asignado" && "Asignado"}
       {s === "en_progreso" && "En progreso"}
       {s === "completada" && "Completada"}
-      {s === "cancelado" && "Cancelado"}
+      {s === "cancelada" && "Cancelada"}
     </span>
   );
 
@@ -199,7 +198,7 @@ export default function Evaluaciones() {
             <option value="asignado">Asignado</option>
             <option value="en_progreso">En progreso</option>
             <option value="completada">Completada</option>
-            <option value="cancelado">Cancelado</option>
+            <option value="cancelada">Cancelada</option>
           </select>
 
           {isAdmin && (
@@ -242,7 +241,7 @@ export default function Evaluaciones() {
             )}
 
             {!loading && rows.map((r) => {
-              const canDoTest = isOperator && userId && r.asignado_a === userId && !["completada","cancelado"].includes(r.estado);
+              const canDoTest = isOperator && userId && r.asignado_a === userId && ["asignado","en_progreso"].includes(r.estado);
               const canEdit = isAdmin;
               const canDelete = isAdmin;
               const canView = isAssistant || canEdit || canDoTest;
@@ -309,7 +308,6 @@ export default function Evaluaciones() {
         </table>
       </div>
 
-      {/* Paginación fija (solo si hay más de 1 página) */}
       {totalPages > 1 && (
         <div className="pagination-fixed">
           <button className="pg" disabled={page === 1} onClick={() => setPage(1)} aria-label="Primera">«</button>

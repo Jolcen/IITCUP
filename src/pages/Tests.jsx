@@ -3,11 +3,9 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import "../styles/Tests.css";
 
-// Slug -> código (como en la BD `pruebas.codigo`)
 const SLUG2CODE = { pai: "PAI", "mcmi-iv": "MCMI-IV", "mmpi-2": "MMPI-2", custom: "CUSTOM" };
 const CODE2SLUG = Object.fromEntries(Object.entries(SLUG2CODE).map(([slug, code]) => [code, slug]));
 
-// Catálogo visual
 const tests = [
   { id: "pai",     nombre: "Personality Assessment Inventory",                imagen: "static/images/pai.jpg" },
   { id: "mcmi-iv", nombre: "Millon Clinical Multiaxial Inventory - IV",      imagen: "static/images/mcmi-iv.jpg" },
@@ -25,17 +23,15 @@ export default function Tests() {
 
   const [selectedId, setSelectedId] = useState(null);
 
-  // { slug: true } para asignadas / completadas
   const [assignedBySlug, setAssignedBySlug] = useState({});
   const [doneBySlug, setDoneBySlug] = useState({});
 
   const [loadingAssigned, setLoadingAssigned] = useState(true);
   const [loadingDone, setLoadingDone] = useState(true);
 
-  // ----- ASIGNADAS (lee casos_pruebas -> pruebas.codigo) -----
+  // ----- ASIGNADAS -----
   useEffect(() => {
     let alive = true;
-
     const loadAssigned = async () => {
       setLoadingAssigned(true);
       if (!caseId) {
@@ -43,7 +39,6 @@ export default function Tests() {
         setLoadingAssigned(false);
         return;
       }
-
       const codes = new Set();
 
       const res = await supabase
@@ -54,12 +49,10 @@ export default function Tests() {
       if (!res.error && Array.isArray(res.data) && res.data.length) {
         res.data.forEach(r => r?.pruebas?.codigo && codes.add(r.pruebas.codigo));
       } else {
-        // Fallback dos pasos por si el join lo bloquea RLS
         const step1 = await supabase
           .from("casos_pruebas")
           .select("prueba_id")
           .eq("caso_id", caseId);
-
         if (!step1.error && step1.data?.length) {
           const ids = step1.data.map(r => r.prueba_id);
           const step2 = await supabase
@@ -87,7 +80,7 @@ export default function Tests() {
     return () => { alive = false; };
   }, [caseId]);
 
-  // ----- COMPLETADAS (preferimos intentos_prueba.terminado_en) -----
+  // ----- COMPLETADAS por estado del intento -----
   useEffect(() => {
     let alive = true;
 
@@ -103,20 +96,18 @@ export default function Tests() {
 
       const res = await supabase
         .from("intentos_prueba")
-        .select("pruebas!inner(codigo)")
+        .select("pruebas!inner(codigo), estado, terminado_en")
         .eq("caso_id", caseId)
-        .not("terminado_en", "is", null);
+        .or("terminado_en.not.is.null,estado.eq.evaluado");
 
       if (!res.error && Array.isArray(res.data) && res.data.length) {
         res.data.forEach(r => r?.pruebas?.codigo && codes.add(r.pruebas.codigo));
       } else {
-        // Fallback dos pasos
         const step1 = await supabase
           .from("intentos_prueba")
-          .select("prueba_id")
+          .select("prueba_id, estado, terminado_en")
           .eq("caso_id", caseId)
-          .not("terminado_en", "is", null);
-
+          .or("terminado_en.not.is.null,estado.eq.evaluado");
         if (!step1.error && step1.data?.length) {
           const ids = step1.data.map(r => r.prueba_id);
           const step2 = await supabase
@@ -145,7 +136,6 @@ export default function Tests() {
     return () => { alive = false; };
   }, [caseId]);
 
-  // Preseleccionar: sugerida si está asignada y no completada; si no, primera disponible
   useEffect(() => {
     if (suggested && assignedBySlug[suggested] && !doneBySlug[suggested]) {
       setSelectedId(suggested);
@@ -160,13 +150,7 @@ export default function Tests() {
     [assignedBySlug]
   );
 
-  const handleSeleccionar = (id) => {
-    if (!assignedBySlug[id]) return; // no asignada
-    if (doneBySlug[id]) return;      // ya completada
-    setSelectedId(id);
-  };
-
-  const handleRealizarTest = () => {
+  const handleRealizarTest = async () => {
     if (!selectedId) return;
     if (!assignedBySlug[selectedId]) {
       alert("Esta prueba no está asignada al caso.");
@@ -213,7 +197,7 @@ export default function Tests() {
             <div
               key={test.id}
               className={`card-test ${isSelected ? "seleccionado" : ""} ${done ? "done" : ""}`}
-              onClick={() => handleSeleccionar(test.id)}
+              onClick={() => !done && setSelectedId(test.id)}
               aria-disabled={done}
               title={done ? "Prueba completada" : "Seleccionar"}
             >

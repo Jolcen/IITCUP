@@ -12,17 +12,17 @@ export default function Historial() {
   // KPIs
   const [kpis, setKpis] = useState({ totalIntentos: 0, totalCompletas: 0, loading: true });
 
-  // tabla
+  // Tabla
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
 
-  // filtros
-  const [q, setQ] = useState("");                     // texto (paciente/CI/motivo/prueba)
-  const [status, setStatus] = useState("todos");      // todos | pendiente | en_evaluacion | evaluado
+  // Filtros
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("todos"); // todos | pendiente | en_evaluacion | evaluado
 
-  // fallback nombres (si RLS bloquea embeds)
+  // Cache responsables
   const [userMap, setUserMap] = useState({});
 
   // ---------- KPIs ----------
@@ -45,139 +45,200 @@ export default function Historial() {
           totalCompletas: r2.count || 0,
           loading: false,
         });
-      } catch {
+      } catch (err) {
+        console.error("KPIs error:", err?.message || err);
         if (alive) setKpis((k) => ({ ...k, loading: false }));
       }
     })();
     return () => { alive = false; };
   }, []);
 
-  // ---------- Carga de tabla (bitácora de intentos) ----------
+  // ---------- Tabla ----------
   useEffect(() => {
     let alive = true;
+
     (async () => {
-      const from = (page - 1) * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
+      try {
+        const from = (page - 1) * PAGE_SIZE;
+        const to = from + PAGE_SIZE - 1;
 
-      // Traemos intentos + joins (si RLS lo permite)
-      const sel = `
-        id,
-        caso_id,
-        prueba_id,
-        iniciado_en,
-        terminado_en,
-        duracion_segundos,
-        firma_base64,
-        casos:caso_id (
-          paciente_nombre,
-          paciente_ci,
-          motivacion,
-          creado_en,
-          asignado_a,
-          responsable:app_users!casos_asignado_a_fkey (id, nombre, email)
-        ),
-        pruebas:prueba_id (codigo)
-      `;
+        // 1) Intentos (sin joins)
+        const { data: intentos, error: errI, count } = await supabase
+          .from("intentos_prueba")
+          .select(
+            `
+            id,
+            caso_id,
+            prueba_id,
+            estado,
+            iniciado_en,
+            empezado_en,
+            terminado_en,
+            finalizado_en,
+            duracion_segundos
+          `,
+            { count: "exact" }
+          )
+          .order("iniciado_en", { ascending: false })
+          .range(from, to);
 
-      const { data, error, count } = await supabase
-        .from("intentos_prueba")
-        .select(sel, { count: "exact" })
-        .order("iniciado_en", { ascending: false })
-        .range(from, to);
+        if (errI) throw errI;
 
-      if (error) {
-        console.error("❌ Error cargando intentos:", error);
-        setRows([]);
-        setTotal(0);
-        return;
-      }
+        const casoIds = Array.from(new Set((intentos || []).map((x) => x.caso_id).filter(Boolean)));
+        const pruebaIds = Array.from(new Set((intentos || []).map((x) => x.prueba_id).filter(Boolean)));
 
-      let list = (data || []).map((r) => {
-        const estado = r.terminado_en
-          ? "evaluado"
-          : r.iniciado_en
-          ? "en_evaluacion"
-          : "pendiente";
-
-        const paciente_nombre =
-          r.casos?.paciente_nombre ?? "—";
-        const paciente_ci =
-          r.casos?.paciente_ci ?? "—";
-        const motivacion =
-          r.casos?.motivacion ?? "—";
-        const prueba_codigo =
-          r.pruebas?.codigo ?? "—";
-
-        // responsable (puede venir como array por el embed)
-        let responsable = "—";
-        const emb = r.casos?.responsable;
-        if (Array.isArray(emb) && emb[0]) {
-          responsable = emb[0].nombre || emb[0].email || "—";
-        } else if (emb) {
-          responsable = emb.nombre || emb.email || "—";
+        // 2) Casos
+        let casosById = {};
+        if (casoIds.length) {
+          const { data: casos, error: errC } = await supabase
+            .from("casos")
+            .select("id, paciente_id, motivacion, creado_en, asignado_a")
+            .in("id", casoIds);
+          if (errC) throw errC;
+          casosById = Object.fromEntries((casos || []).map((c) => [c.id, c]));
         }
 
-        return {
-          ...r,
-          estado,
-          paciente_nombre,
-          paciente_ci,
-          motivacion,
-          prueba_codigo,
-          responsable,
-          creado_en: r.casos?.creado_en ?? r.iniciado_en ?? null,
-        };
-      });
-
-      // Filtro búsqueda (cliente-side)
-      if (q.trim()) {
-        const term = q.toLowerCase();
-        list = list.filter((r) =>
-          (r.paciente_nombre || "").toLowerCase().includes(term) ||
-          (r.paciente_ci || "").toLowerCase().includes(term) ||
-          (r.motivacion || "").toLowerCase().includes(term) ||
-          (r.prueba_codigo || "").toLowerCase().includes(term)
+        // 3) Pacientes (campos reales)
+        const pacienteIds = Array.from(
+          new Set(Object.values(casosById).map((c) => c.paciente_id).filter(Boolean))
         );
-      }
+        let pacientesById = {};
+        if (pacienteIds.length) {
+          const { data: pacientes, error: errP } = await supabase
+            .from("pacientes")
+            .select(
+              `
+              id,
+              nombres,
+              apellidos,
+              doc_tipo,
+              doc_numero,
+              doc_expedido,
+              foto_carnet_path,
+              foto_carnet_bucket
+            `
+            )
+            .in("id", pacienteIds);
+          if (errP) throw errP;
+          pacientesById = Object.fromEntries((pacientes || []).map((p) => [p.id, p]));
+        }
 
-      // Filtro estado (cliente-side)
-      if (status !== "todos") {
-        list = list.filter((r) => (r.estado || "pendiente") === status);
-      }
+        // 4) Pruebas
+        let pruebasById = {};
+        if (pruebaIds.length) {
+          const { data: pruebas, error: errPr } = await supabase
+            .from("pruebas")
+            .select("id, codigo")
+            .in("id", pruebaIds);
+          if (errPr) throw errPr;
+          pruebasById = Object.fromEntries((pruebas || []).map((p) => [p.id, p]));
+        }
 
-      // Fallback por RLS (responsable por asignado_a)
-      const missingIds = Array.from(
-        new Set(
-          (list || [])
-            .filter((r) => !r.responsable || r.responsable === "—")
-            .map((r) => r.casos?.asignado_a)
-            .filter(Boolean)
-        )
-      );
-      if (missingIds.length > 0) {
-        const { data: users, error: uerr } = await supabase
-          .from("app_users")
-          .select("id, nombre, email")
-          .in("id", missingIds);
+        // 5) Armar lista final
+        let list = (intentos || []).map((r) => {
+          const c = casosById[r.caso_id] || {};
+          const p = c.paciente_id ? pacientesById[c.paciente_id] || {} : {};
+          const pr = pruebasById[r.prueba_id] || {};
 
-        if (!uerr && users) {
+          // Nombre y documento del paciente
+          const paciente_nombre = [p.nombres, p.apellidos].filter(Boolean).join(" ") || "—";
+          const documento = [p.doc_tipo, p.doc_numero, p.doc_expedido].filter(Boolean).join(" ") || "—";
+
+          // Estado
+          const estado =
+            r.terminado_en || r.finalizado_en
+              ? "evaluado"
+              : r.iniciado_en || r.empezado_en
+              ? "en_evaluacion"
+              : "pendiente";
+
+          // Fecha base
+          const creado_en = c.creado_en ?? r.iniciado_en ?? null;
+
+          // Duración (minutos)
+          let durSeg =
+            typeof r.duracion_segundos === "number" ? r.duracion_segundos : null;
+
+          if ((durSeg === null || isNaN(durSeg)) && (r.terminado_en || r.finalizado_en)) {
+            const end = new Date(r.terminado_en || r.finalizado_en).getTime();
+            const startRaw = r.iniciado_en || r.empezado_en || creado_en;
+            const start = startRaw ? new Date(startRaw).getTime() : null;
+            if (start && end && end > start) {
+              durSeg = Math.floor((end - start) / 1000);
+            }
+          }
+          let durMin = null;
+          if (typeof durSeg === "number") {
+            const m = Math.round(durSeg / 60);
+            durMin = m < 1 ? "<1" : m;
+          }
+
+          return {
+            ...r,
+            estado,
+            paciente_nombre,
+            paciente_doc: documento,
+            motivacion: c.motivacion ?? "—",
+            prueba_codigo: pr.codigo ?? "—",
+            creado_en,
+            asignado_a: c.asignado_a ?? null,
+            responsable: null,        // se completa abajo con userMap
+            duracion_minutos: durMin, // para UI
+            // Datos del paciente por si luego quieres usarlos:
+            foto_carnet_path: p.foto_carnet_path || null,
+            foto_carnet_bucket: p.foto_carnet_bucket || null,
+          };
+        });
+
+        // Filtros cliente-side
+        if (q.trim()) {
+          const term = q.toLowerCase();
+          list = list.filter((r) =>
+            (r.paciente_nombre || "").toLowerCase().includes(term) ||
+            (r.paciente_doc || "").toLowerCase().includes(term) ||
+            (r.motivacion || "").toLowerCase().includes(term) ||
+            (r.prueba_codigo || "").toLowerCase().includes(term)
+          );
+        }
+        if (status !== "todos") {
+          list = list.filter((r) => (r.estado || "pendiente") === status);
+        }
+
+        // Responsables (app_users)
+        const missingIds = Array.from(
+          new Set(
+            (list || [])
+              .map((r) => r.asignado_a)
+              .filter(Boolean)
+              .filter((id) => !userMap[id])
+          )
+        );
+        if (missingIds.length) {
+          const { data: users, error: errU } = await supabase
+            .from("app_users")
+            .select("id, nombre, email")
+            .in("id", missingIds);
+          if (errU) throw errU;
           const map = {};
-          users.forEach((u) => (map[u.id] = u.nombre || u.email || u.id));
+          (users || []).forEach((u) => (map[u.id] = u.nombre || u.email || u.id));
           if (alive) setUserMap((prev) => ({ ...prev, ...map }));
         }
-      }
 
-      // Aplicar fallback de nombres si procede
-      list = list.map((r) => {
-        if ((!r.responsable || r.responsable === "—") && r.casos?.asignado_a && userMap[r.casos.asignado_a]) {
-          return { ...r, responsable: userMap[r.casos.asignado_a] };
+        list = list.map((r) => ({
+          ...r,
+          responsable: r.asignado_a ? (userMap[r.asignado_a] ?? "—") : "—",
+        }));
+
+        if (!alive) return;
+        setRows(list);
+        setTotal(count ?? list.length);
+      } catch (err) {
+        console.error("❌ Error cargando intentos:", err?.message || err);
+        if (alive) {
+          setRows([]);
+          setTotal(0);
         }
-        return r;
-      });
-
-      if (!alive) return;
-      setRows(list);
-      setTotal(count ?? list.length); // si count está, úsalo
+      }
     })();
 
     return () => { alive = false; };
@@ -206,15 +267,6 @@ export default function Historial() {
     );
   };
 
-  function formatDur(sec) {
-    if (!sec && sec !== 0) return "—";
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    const s = sec % 60;
-    const pad = (n) => String(n).padStart(2, "0");
-    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
-  }
-
   // ---------- Render ----------
   return (
     <div className="historial-page">
@@ -241,7 +293,7 @@ export default function Historial() {
             <div className="searchbox">
               🔍
               <input
-                placeholder="Buscar por paciente, CI, motivo o prueba…"
+                placeholder="Buscar por paciente, documento, motivo o prueba…"
                 value={q}
                 onChange={(e) => { setPage(1); setQ(e.target.value); }}
               />
@@ -264,7 +316,7 @@ export default function Historial() {
           <thead>
             <tr>
               <th>Paciente</th>
-              <th>CI</th>
+              <th>Documento</th>
               <th>Motivo</th>
               <th>Prueba</th>
               <th>Fecha</th>
@@ -285,16 +337,26 @@ export default function Historial() {
             {rows.map((r) => (
               <tr key={r.id}>
                 <td>{r.paciente_nombre}</td>
-                <td>{r.paciente_ci}</td>
+                <td>{r.paciente_doc}</td>
                 <td title={r.motivacion || ""}>{r.motivacion || "—"}</td>
                 <td>{r.prueba_codigo}</td>
-                <td>{r.iniciado_en ? new Date(r.iniciado_en).toLocaleString() : (r.creado_en ? new Date(r.creado_en).toLocaleString() : "—")}</td>
+                <td>
+                  {r.iniciado_en
+                    ? new Date(r.iniciado_en).toLocaleString()
+                    : r.creado_en
+                    ? new Date(r.creado_en).toLocaleString()
+                    : "—"}
+                </td>
                 <td>{r.responsable || "—"}</td>
                 <td>{renderEstado(r.estado)}</td>
-                <td>{r.terminado_en ? formatDur(r.duracion_segundos) : "—"}</td>
-                <td>{r.firma_base64 ? "✔" : "—"}</td>
                 <td>
-                  {r.terminado_en ? (
+                  {r.terminado_en || r.finalizado_en
+                    ? (r.duracion_minutos === "<1" ? "<1 min" : `${r.duracion_minutos} min`)
+                    : "—"}
+                </td>
+                <td>—{/* si luego quieres mostrar firma, se reemplaza */}</td>
+                <td>
+                  {r.terminado_en || r.finalizado_en ? (
                     <button
                       className="btn-link"
                       onClick={() => navigate(`/resultados/${r.id}?caso=${r.caso_id}`)}

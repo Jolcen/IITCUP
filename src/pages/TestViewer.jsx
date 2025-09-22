@@ -1,10 +1,11 @@
+// src/pages/TestViewer.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
+import AttemptSignature from "../components/AttemptSignature"; // ⬅️ NUEVO
 import "../styles/TestViewer.css";
 
 const SLUG2CODE = { pai: "PAI", "mcmi-iv": "MCMI-IV", "mmpi-2": "MMPI-2", custom: "CUSTOM" };
-const OPERATOR_PASS_DEMO = "1234"; // ← demo
 
 export default function TestViewer() {
   const { testId } = useParams();
@@ -13,42 +14,45 @@ export default function TestViewer() {
   const pacienteNombre = sp.get("nombre") || "";
   const navigate = useNavigate();
 
-  // Estado principal
+  // ============ Estado principal ============
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Tiempo / intento
-  const [time, setTime] = useState(0);
-  const tickingRef = useRef(null);
-  const startedAtRef = useRef(null);
-  const [preStart, setPreStart] = useState(true);
+  // Intento actual / prueba
   const [attemptId, setAttemptId] = useState(null);
   const [pruebaId, setPruebaId] = useState(null);
+  const [attemptState, setAttemptState] = useState(null); // pendiente | en_evaluacion | interrumpido | evaluado
+  const [attemptEnded, setAttemptEnded] = useState(false); // terminado_en != null
 
-  // Candados
-  const savingRef = useRef(false);
-  const finishedRef = useRef(false);
-
-  // Final flow (firma + pantalla final)
+  // Fases
+  const [preStart, setPreStart] = useState(true);
   const [showSignModal, setShowSignModal] = useState(false);
   const [showFinishScreen, setShowFinishScreen] = useState(false);
 
-  // Modal contraseña operador (reutilizable)
+  // Tiempo
+  const [time, setTime] = useState(0);
+  const tickingRef = useRef(null);
+  const startedAtRef = useRef(null);
+
+  // Locks
+  const savingRef = useRef(false);
+  const finishedRef = useRef(false);
+
+  // Modal contraseña operador (re-autenticación real)
   const [askPassOpen, setAskPassOpen] = useState(false);
   const operatorPassInputRef = useRef(null);
   const operatorPassName = useMemo(() => "op_" + Math.random().toString(36).slice(2), []);
-  const deferredActionRef = useRef(null); // callback tras validar pass
+  const deferredActionRef = useRef(null);
 
-  // Firma (canvas)
-  const canvasRef = useRef(null);
+  // Firma (solo consentimiento aquí; la firma real está en AttemptSignature)
   const [consentChecked, setConsentChecked] = useState(false);
-  const [hasDrawn, setHasDrawn] = useState(false);
 
+  // clave para limpiar cache local del intento
   const storageKey = useMemo(
-    () => `progress-${testId}-${caseId || "no-case"}`,
-    [testId, caseId]
+    () => (attemptId ? `attempt:${attemptId}:answers` : null),
+    [attemptId]
   );
 
   const code = useMemo(
@@ -56,30 +60,21 @@ export default function TestViewer() {
     [testId]
   );
 
-  // ====== TTS: prioriza Piper / neural ======
+  // ====== TTS (opcional) ======
   const [ttsVoice, setTtsVoice] = useState(null);
   function pickBestSpanishVoice(voices) {
-    const piper = voices.find(v =>
-      (v.lang || "").toLowerCase().startsWith("es") && /piper/i.test(v.name || "")
-    );
-    if (piper) return piper;
-    const natural = voices.find(v =>
-      (v.lang || "").toLowerCase().startsWith("es") &&
-      /neural|natural|online/i.test(v.name || "")
-    );
-    if (natural) return natural;
-    const es = voices.find(v => (v.lang || "").toLowerCase().startsWith("es"));
-    return es || voices[0] || null;
+    const byName = (rex) => voices.find((v) => (v.lang || "").toLowerCase().startsWith("es") && rex.test(v.name || ""));
+    return byName(/piper/i) || byName(/neural|natural|online/i) || voices.find(v => (v.lang || "").toLowerCase().startsWith("es")) || voices[0] || null;
   }
   useEffect(() => {
     function loadVoices() {
-      const voices = window.speechSynthesis?.getVoices?.() || [];
-      if (voices.length) setTtsVoice(pickBestSpanishVoice(voices));
+      const vs = (window.speechSynthesis.getVoices && window.speechSynthesis.getVoices()) || [];
+      if (vs.length) setTtsVoice(pickBestSpanishVoice(vs));
     }
     loadVoices();
-    window.speechSynthesis?.addEventListener?.("voiceschanged", loadVoices);
+    window.speechSynthesis.addEventListener?.("voiceschanged", loadVoices);
     return () => {
-      window.speechSynthesis?.removeEventListener?.("voiceschanged", loadVoices);
+      window.speechSynthesis.removeEventListener?.("voiceschanged", loadVoices);
     };
   }, []);
   function sanitizeForSpeech(raw) {
@@ -106,13 +101,13 @@ export default function TestViewer() {
   }
   function speakPregunta(texto) {
     try {
-      const clean = sanitizeForSpeech(texto);
+      const clean = sanitizeForSpeech(texto || "");
       if (!clean) return;
-      window.speechSynthesis?.cancel?.();
+      window.speechSynthesis.cancel?.();
       const chunks = chunkText(clean);
       chunks.forEach((chunk, i) => {
         const u = new SpeechSynthesisUtterance(chunk);
-        u.lang = (ttsVoice?.lang) || "es-ES";
+        u.lang = (ttsVoice && ttsVoice.lang) || "es-ES";
         if (ttsVoice) u.voice = ttsVoice;
         u.rate = 0.95; u.pitch = 1.0; u.volume = 1.0;
         if (i > 0) u.text = " " + u.text;
@@ -124,35 +119,97 @@ export default function TestViewer() {
 
   useEffect(() => {
     document.body.classList.add("focus-test");
-    return () => { document.body.classList.remove("focus-test"); };
+    return () => {
+      document.body.classList.remove("focus-test");
+      try { window.speechSynthesis.cancel?.(); } catch {}
+    };
   }, []);
 
+  // -------- Helpers --------
+  function normalizeOptions(v) {
+    if (Array.isArray(v)) return v;
+    if (typeof v === "string") {
+      try { return JSON.parse(v); } catch {}
+      try { return JSON.parse(v.replace(/'/g, '"')); } catch {}
+      return v.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+    if (v && typeof v === "object") return v;
+    return [];
+  }
+
+  function getRawFromOption(q, opcionElegida) {
+    const opcion_txt =
+      typeof opcionElegida === "string"
+        ? opcionElegida
+        : opcionElegida?.label ?? String(opcionElegida);
+
+    if (!q?.opciones || q?.tipo !== "likert") return null;
+
+    if (Array.isArray(q.opciones)) {
+      const idx = q.opciones.findIndex(
+        (o) => (typeof o === "string" ? o : o?.label ?? o?.txt ?? "") === opcion_txt
+      );
+      if (idx >= 0) {
+        const o = q.opciones[idx];
+        const cand = typeof o === "object" ? o.raw ?? o.value ?? o.score ?? o.puntaje : undefined;
+        if (cand !== undefined && Number.isFinite(Number(cand))) return Number(cand);
+        return idx;
+      }
+      return null;
+    }
+
+    if (q.opciones && typeof q.opciones === "object") {
+      const entries = Object.entries(q.opciones);
+      const found = entries.find(([key, val]) => {
+        const lbl = val?.label ?? val?.txt ?? val?.text ?? key;
+        return lbl === opcion_txt;
+      });
+      if (found) {
+        const val = found[1];
+        const cand = val?.raw ?? val?.value ?? val?.score ?? val?.puntaje;
+        if (cand !== undefined && Number.isFinite(Number(cand))) return Number(cand);
+      }
+    }
+    return null;
+  }
+
+  // === Buscar o crear intento abierto (terminado_en IS NULL) ===
   async function ensureAttempt(pid) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Sin sesión.");
+    if (!caseId) throw new Error("Falta caseId.");
 
+    // Uno abierto
     const { data: abiertos, error: e1 } = await supabase
       .from("intentos_prueba")
-      .select("id")
+      .select("id, estado, terminado_en")
       .eq("caso_id", caseId)
       .eq("prueba_id", pid)
       .is("terminado_en", null)
       .limit(1);
     if (e1) throw e1;
 
-    if (abiertos && abiertos.length) return abiertos[0].id;
+    if (abiertos && abiertos.length) {
+      const it = abiertos[0];
+      setAttemptState(it.estado || null);
+      setAttemptEnded(!!it.terminado_en);
+      return it.id;
+    }
 
+    // crear
     const { data: creado, error: e2 } = await supabase
       .from("intentos_prueba")
-      .insert({ caso_id: caseId, prueba_id: pid })
-      .select("id")
+      .insert({ caso_id: caseId, prueba_id: pid }) // default estado = 'pendiente'
+      .select("id, estado, terminado_en")
       .single();
     if (e2) throw e2;
 
+    setAttemptState(creado.estado || "pendiente");
+    setAttemptEnded(!!creado.terminado_en);
     return creado.id;
   }
 
-  // Carga prueba + ítems
+  // ------ Cargar prueba + items + progreso desde BD ------
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -160,10 +217,11 @@ export default function TestViewer() {
         setLoading(true);
         setErr("");
 
+        // 1) id prueba
         const { data: pruebas, error: eP } = await supabase
           .from("pruebas")
           .select("id, codigo")
-          .ilike("codigo", code)
+          .ilike("codigo", SLUG2CODE[testId] ?? (testId || "").toUpperCase())
           .limit(1);
         if (eP) throw eP;
         if (!pruebas?.length) throw new Error("No se encontró la prueba en la base de datos.");
@@ -171,48 +229,57 @@ export default function TestViewer() {
         if (!alive) return;
         setPruebaId(pid);
 
+        // 2) Bloquear si ya evaluada/terminada
         if (caseId) {
           const { data: comp, error: eComp } = await supabase
             .from("intentos_prueba")
-            .select("id")
+            .select("id, estado, terminado_en")
             .eq("caso_id", caseId)
             .eq("prueba_id", pid)
-            .not("terminado_en", "is", null)
+            .or("terminado_en.not.is.null,estado.eq.evaluado")
             .limit(1);
           if (eComp) throw eComp;
-          if (comp && comp.length) { if (alive) setErr("Esta prueba ya fue completada para este caso."); return; }
+          if (comp && comp.length) {
+            if (alive) setErr("Esta prueba ya fue evaluada para este caso.");
+            return;
+          }
         }
 
+        // 3) Cargar items de la prueba
         const { data, error } = await supabase
           .from("items_prueba")
-          .select("id, enunciado, opciones, inverso, orden, activo")
+          .select("id, enunciado, opciones, inverso, orden, activo, tipo")
           .eq("prueba_id", pid)
           .eq("activo", true)
           .order("orden", { ascending: true })
           .limit(2000);
         if (error) throw error;
         if (!data?.length) throw new Error("No hay ítems para esta prueba.");
+
         const mapped = data.map((r, i) => ({
           id: r.id,
           texto: r.enunciado,
           opciones: normalizeOptions(r.opciones),
           inverso: !!r.inverso,
           orden: r.orden ?? i + 1,
+          tipo: r.tipo || "opcion",
         }));
         if (!alive) return;
         setItems(mapped);
 
-        const saved = localStorage.getItem(storageKey);
-        if (saved) {
-          try {
-            const s = JSON.parse(saved);
-            if (Number.isInteger(s.currentIndex)) setCurrentIndex(s.currentIndex);
-          } catch {}
-        }
-
+        // 4) Asegurar (o crear) intento abierto
         const atid = await ensureAttempt(pid);
         if (!alive) return;
         setAttemptId(atid);
+
+        // 5) Reconstruir progreso sin localStorage
+        const { data: resp } = await supabase
+          .from("respuestas")
+          .select("item_id")
+          .eq("intento_id", atid);
+        const answered = new Set((resp || []).map(r => r.item_id));
+        const firstIdx = mapped.findIndex(q => !answered.has(q.id));
+        setCurrentIndex(firstIdx === -1 ? mapped.length : firstIdx);
       } catch (e) {
         console.error(e);
         if (alive) setErr(e.message || "Error cargando la prueba.");
@@ -223,64 +290,57 @@ export default function TestViewer() {
 
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [testId, caseId, code, storageKey]);
+  }, [testId, caseId]);
 
-  // Iniciar prueba → cronómetro e iniciado_en
+  // ------ Iniciar prueba -> estado en_evaluacion (RPC) ------
   async function startTest() {
     if (!attemptId) return;
-    try {
-      const nowIso = new Date().toISOString();
-      startedAtRef.current = Date.now();
-      await supabase.from("intentos_prueba").update({ iniciado_en: nowIso }).eq("id", attemptId);
-      if (tickingRef.current) clearInterval(tickingRef.current);
-      setTime(0);
-      tickingRef.current = setInterval(() => setTime(t => t + 1), 1000);
-      setPreStart(false);
-    } catch (e) {
-      console.error("No se pudo marcar inicio:", e);
-      if (tickingRef.current) clearInterval(tickingRef.current);
-      setTime(0);
-      tickingRef.current = setInterval(() => setTime(t => t + 1), 1000);
-      setPreStart(false);
+
+    const { error: rpcErr } = await supabase.rpc("start_intento", { p_id: attemptId });
+    if (rpcErr) {
+      console.warn("[startTest] RPC falló, intento fallback .update()", rpcErr);
+      const { error: updErr } = await supabase
+        .from("intentos_prueba")
+        .update({ estado: "en_evaluacion" })
+        .eq("id", attemptId);
+      if (updErr) {
+        alert(updErr.message || "No se pudo iniciar la prueba.");
+        return;
+      }
     }
+
+    const nowIso = new Date().toISOString();
+    startedAtRef.current = Date.now();
+    if (tickingRef.current) clearInterval(tickingRef.current);
+    setTime(0);
+    tickingRef.current = setInterval(() => setTime((t) => t + 1), 1000);
+
+    setAttemptState("en_evaluacion");
+    setPreStart(false);
   }
 
-  useEffect(() => {
-    localStorage.setItem(
-      storageKey,
-      JSON.stringify({ testId, caseId, currentIndex })
-    );
-  }, [currentIndex, testId, caseId, storageKey]);
-
-  // --- helper: puntaje por opción ---
-  function scoreFromOption(op, idxEnLista) {
-    if (op && typeof op === "object") {
-      if (Number.isFinite(op.score)) return op.score;
-      if (typeof op.value === "number") return op.value;
-    }
-    // fallback Nada/Poco/Algo/Mucho → 0..3
-    return idxEnLista ?? 0;
-  }
-
-  // Guardar respuesta (JSONB requerido por el backend)
+  // ------ Guardar respuesta ------
   async function handleAnswer(opcionElegida) {
     if (savingRef.current || !attemptId) return;
+
+    if (attemptEnded || attemptState === "evaluado") {
+      alert("Este intento ya no es editable.");
+      return;
+    }
+
+    // Snapshot por seguridad de UI
     const idxSnapshot = currentIndex;
     const q = items[idxSnapshot];
     if (!q) return;
 
     savingRef.current = true;
     try {
-      const idxEnLista = Array.isArray(q.opciones)
-        ? q.opciones.findIndex(o => o === opcionElegida || o?.label === opcionElegida)
-        : 0;
-
-      const code_txt =
+      const opcion_txt =
         typeof opcionElegida === "string"
           ? opcionElegida
-          : (opcionElegida?.label ?? String(opcionElegida));
+          : opcionElegida?.label ?? String(opcionElegida);
 
-      const score_num = scoreFromOption(opcionElegida, Math.max(0, idxEnLista));
+      const raw = q?.tipo === "likert" ? getRawFromOption(q, opcionElegida) : null;
 
       const payload = {
         caso_id: caseId,
@@ -288,7 +348,7 @@ export default function TestViewer() {
         item_id: q.id,
         intento_id: attemptId,
         invertido: q.inverso ?? false,
-        valor: { code_txt, score_num }, // ← JSONB
+        valor: { opcion_txt, raw },
       };
 
       const { error } = await supabase
@@ -299,177 +359,33 @@ export default function TestViewer() {
     } catch (e) {
       console.error("Excepción guardando respuesta:", e);
     } finally {
-      setCurrentIndex((i) => (i === idxSnapshot ? i + 1 : i));
+      // Avanza al siguiente ítem
+      setCurrentIndex((i) => {
+        const next = i + 1;
+        return next >= items.length ? next : next;
+      });
       savingRef.current = false;
     }
   }
 
-  // === Fin de prueba: firma → finalizar intento → pantalla final ===
+  // ------ Firma ------
   function requestSignature() {
     setConsentChecked(false);
-    setHasDrawn(false);
     setShowSignModal(true);
-    setTimeout(setupCanvas, 0);
   }
 
-  async function finalizeAttemptAfterSignature() {
-    setShowSignModal(false);
-    if (finishedRef.current) return;
-    finishedRef.current = true;
-
+  // Lo que pasa cuando AttemptSignature termina bien
+  const handleSignatureDone = () => {
+    // triggers en DB hacen: validar completo, calcular puntajes, poner 'evaluado', etc.
     try {
-      // --- subir firma al bucket ---
-      let firmaPath = null;
-      if (canvasRef.current) {
-        const dataUrl = canvasRef.current.toDataURL("image/png");
-        const blob = await (await fetch(dataUrl)).blob();
-        const filePath = `${caseId || "sin-caso"}/${code}/${attemptId}/${Date.now()}.png`;
+      if (storageKey) localStorage.removeItem(storageKey);
+    } catch {}
+    if (tickingRef.current) clearInterval(tickingRef.current);
+    setShowSignModal(false);
+    setShowFinishScreen(true);
+  };
 
-        const { error: upErr } = await supabase
-          .storage.from("evidencias")
-          .upload(filePath, blob, { contentType: "image/png", upsert: false });
-
-        if (upErr) {
-          console.error("Error subiendo firma:", upErr);
-          alert("No se pudo guardar la firma, intenta de nuevo.");
-          finishedRef.current = false;
-          setShowSignModal(true);
-          return;
-        }
-        firmaPath = filePath;
-      }
-
-      // --- cerrar intento vía RPC (la función ya marca terminado/duración) ---
-      const { error: rpcErr } = await supabase.rpc("finalizar_intento", {
-        p_intento_id: attemptId,
-        p_firma_bucket: "evidencias",
-        p_firma_path: firmaPath,
-        p_firma_mime: "image/png",
-        p_user_agent: navigator.userAgent,
-        p_comentario: null,
-      });
-
-      if (rpcErr) {
-        console.error("finalizar_intento RPC error:", rpcErr);
-        alert("No se pudo cerrar la prueba. Revisa tu conexión e inténtalo otra vez.");
-        finishedRef.current = false;
-        setShowSignModal(true);
-        return;
-      }
-
-    } catch (e) {
-      console.error("Error finalizando:", e);
-    } finally {
-      localStorage.removeItem(storageKey);
-      if (tickingRef.current) clearInterval(tickingRef.current);
-      setShowFinishScreen(true);
-    }
-  }
-
-
-  function normalizeOptions(v) {
-    if (Array.isArray(v)) return v;
-    if (typeof v === "string") {
-      try { return JSON.parse(v); } catch {}
-      try { return JSON.parse(v.replace(/'/g, '"')); } catch {}
-      return v.split(",").map(s => s.trim()).filter(Boolean);
-    }
-    return [];
-  }
-
-  // ====== Canvas de firma ======
-  function setupCanvas() {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const dpr = window.devicePixelRatio || 1;
-    const w = Math.min(700, window.innerWidth - 48);
-    const h = 200;
-    canvas.width = Math.floor(w * dpr);
-    canvas.height = Math.floor(h * dpr);
-    canvas.style.width = w + "px";
-    canvas.style.height = h + "px";
-    ctx.scale(dpr, dpr);
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = "#ddd";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(16, h - 32);
-    ctx.lineTo(w - 16, h - 32);
-    ctx.stroke();
-  }
-
-  useEffect(() => {
-    function onResize() {
-      if (showSignModal) setupCanvas();
-    }
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [showSignModal]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    let drawing = false;
-    let last = null;
-
-    function pos(e) {
-      const rect = canvas.getBoundingClientRect();
-      const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-      const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
-      return { x, y };
-    }
-    function start(e) {
-      e.preventDefault();
-      drawing = true;
-      last = pos(e);
-      setHasDrawn(true);
-    }
-    function move(e) {
-      if (!drawing) return;
-      e.preventDefault();
-      const p = pos(e);
-      ctx.strokeStyle = "#111";
-      ctx.lineWidth = 2.2;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(last.x, last.y);
-      ctx.lineTo(p.x, p.y);
-      ctx.stroke();
-      last = p;
-    }
-    function end() { drawing = false; last = null; }
-
-    canvas.addEventListener("mousedown", start);
-    canvas.addEventListener("mousemove", move);
-    canvas.addEventListener("mouseup", end);
-    canvas.addEventListener("mouseleave", end);
-
-    canvas.addEventListener("touchstart", start, { passive: false });
-    canvas.addEventListener("touchmove", move, { passive: false });
-    canvas.addEventListener("touchend", end);
-
-    return () => {
-      canvas.removeEventListener("mousedown", start);
-      canvas.removeEventListener("mousemove", move);
-      canvas.removeEventListener("mouseup", end);
-      canvas.removeEventListener("mouseleave", end);
-
-      canvas.removeEventListener("touchstart", start);
-      canvas.removeEventListener("touchmove", move);
-      canvas.removeEventListener("touchend", end);
-    };
-  }, [showSignModal]);
-
-  function clearSignature() {
-    setupCanvas();
-    setHasDrawn(false);
-  }
-  // ====== fin firma ======
-
-  // ====== Modal contraseña operador ======
+  // ====== Modal contraseña operador (re-autenticación real) ======
   function openAskPassModal(onSuccess) {
     deferredActionRef.current = onSuccess;
     setAskPassOpen(true);
@@ -480,46 +396,71 @@ export default function TestViewer() {
   }
   function closeAskPassModal() {
     setAskPassOpen(false);
-    if (operatorPassInputRef.current) {
-      operatorPassInputRef.current.value = "";
-    }
+    if (operatorPassInputRef.current) operatorPassInputRef.current.value = "";
   }
+  // estado nuevo arriba del componente:
+  const [passSubmitting, setPassSubmitting] = useState(false);
+
+  // reemplaza tu handleOperatorPassSubmit por este:
   function handleOperatorPassSubmit(e) {
     e.preventDefault();
-    const val = operatorPassInputRef.current?.value || "";
-    if (val === OPERATOR_PASS_DEMO) {
-      const cb = deferredActionRef.current;
-      closeAskPassModal();
-      deferredActionRef.current = null;
-      cb && cb();
-    } else {
-      alert("Contraseña incorrecta.");
-      operatorPassInputRef.current?.focus();
-    }
+    (async () => {
+      if (passSubmitting) return;
+      setPassSubmitting(true);
+      try {
+        const pass = operatorPassInputRef.current?.value || "";
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user?.email) {
+          alert("Sesión no válida.");
+          return;
+        }
+
+        const { error } = await supabase.auth.signInWithPassword({
+          email: user.email,
+          password: pass,
+        });
+
+        if (error) {
+          // 400 = credenciales inválidas
+          if (error.status === 400) {
+            // feedback sutil sin alert
+            operatorPassInputRef.current?.setCustomValidity("Contraseña incorrecta");
+            operatorPassInputRef.current?.reportValidity();
+            operatorPassInputRef.current?.setCustomValidity("");
+            operatorPassInputRef.current?.focus?.();
+            return;
+          }
+          alert(error.message || "No se pudo verificar. Revisa tu conexión e intenta de nuevo.");
+          return;
+        }
+
+        // OK → ejecuta la acción diferida y cierra
+        const cb = deferredActionRef.current;
+        closeAskPassModal();
+        deferredActionRef.current = null;
+        cb && cb();
+      } finally {
+        setPassSubmitting(false);
+      }
+    })();
   }
-  // ====== fin modal pass ======
 
   function requestExitToEvaluaciones() {
     openAskPassModal(() => {
-      try { window.speechSynthesis?.cancel?.(); } catch {}
-      localStorage.removeItem(storageKey);
+      try { window.speechSynthesis.cancel?.(); } catch {}
       if (tickingRef.current) clearInterval(tickingRef.current);
       navigate("/evaluaciones");
     });
   }
+  function backFromFinish() { openAskPassModal(() => navigate("/evaluaciones")); }
 
-  function backFromFinish() {
-    openAskPassModal(() => {
-      navigate("/evaluaciones");
-    });
-  }
-
-  // ===== render =====
+  // ===== Render =====
   if (loading) return <div className="loader">Cargando prueba...</div>;
   if (err) return <div className="loader" style={{ color: "crimson" }}>{err}</div>;
 
   const total = items.length;
 
+  // Si ya respondió todo y aún no firmó → pedir firma
   if (!preStart && !showFinishScreen && !showSignModal && currentIndex >= total && !finishedRef.current) {
     requestSignature();
     return null;
@@ -530,16 +471,17 @@ export default function TestViewer() {
       <div className="focus-wrap">
         <div className="focus-card">
           <h1 className="focus-title">Iniciar {code}</h1>
-          {pacienteNombre && <p className="focus-sub">Paciente: <strong>{pacienteNombre}</strong></p>}
+          {pacienteNombre && (
+            <p className="focus-sub">Paciente: <strong>{pacienteNombre}</strong></p>
+          )}
           <ul className="focus-bullets">
             <li>Se mostrará una pregunta a la vez.</li>
             <li>Al finalizar, firmarás tu conformidad.</li>
           </ul>
           <div className="focus-actions">
-            <button className="btn-start" onClick={startTest} disabled={!attemptId}>Iniciar prueba</button>
-            {/*
-            <button className="btn-cancel" onClick={() => requestExitToEvaluaciones()}>Cancelar</button>
-            */}
+            <button className="btn-start" onClick={startTest} disabled={!attemptId}>
+              Iniciar prueba
+            </button>
           </div>
         </div>
       </div>
@@ -552,7 +494,7 @@ export default function TestViewer() {
         <div className="finish-card">
           <div className="finish-icon">✅</div>
           <h1 className="finish-title">¡Prueba terminada!</h1>
-          <p className="finish-sub">Se registró la conformidad del paciente.</p>
+          <p className="finish-sub">Se registró la firma. El operador revisará y finalizará.</p>
           <div className="finish-actions">
             <button className="btn-back" onClick={backFromFinish}>
               ← Volver a Evaluaciones
@@ -582,7 +524,9 @@ export default function TestViewer() {
                 />
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                   <button type="button" className="btn-cancel-exit" onClick={closeAskPassModal}>Cancelar</button>
-                  <button type="submit" className="btn-confirm-exit">Confirmar</button>
+                  <button type="submit" className="btn-confirm-exit" disabled={passSubmitting}>
+                    {passSubmitting ? "Verificando…" : "Confirmar"}
+                  </button>
                 </div>
               </form>
             </div>
@@ -594,41 +538,51 @@ export default function TestViewer() {
 
   const pregunta = items[currentIndex];
   const opciones = pregunta?.opciones?.length ? pregunta.opciones : ["Nada", "Poco", "Algo", "Mucho"];
-  const botonesDeshabilitados = savingRef.current || !attemptId;
+  const editable = !attemptEnded && attemptState !== "evaluado";
+  const botonesDeshabilitados = savingRef.current || !attemptId || !editable;
 
   return (
     <div className="test-topbar-container">
       <div className="test-topbar">
         <div className="test-topbar-spacer" />
         <div className="test-topbar-title">{code}</div>
-        <button className="btn-exit" onClick={requestExitToEvaluaciones} title="Salir">✖</button>
+        <button className="btn-exit" onClick={requestExitToEvaluaciones} title="Salir">
+          ✖
+        </button>
       </div>
 
       <div className="test-container">
         <div className="test-header">
-          <h3 className="test-title">Pregunta {currentIndex + 1}</h3>
+          <h3 className="test-title">
+            {currentIndex < total ? `Pregunta ${currentIndex + 1}` : "Firmar"}
+          </h3>
         </div>
 
-        <div className="test-question">
-          <p className="test-question-text">{pregunta?.texto}</p>
-        </div>
+        {currentIndex < total ? (
+          <>
+            <div className="test-question">
+              <p className="test-question-text">{pregunta?.texto}</p>
+            </div>
 
-        <div className="test-options">
-          {opciones.map((op, idx) => (
-            <button
-              key={idx}
-              className="btn-opcion"
-              onClick={() => handleAnswer(op)}
-              disabled={botonesDeshabilitados}
-              title={!attemptId ? "Preparando..." : "Seleccionar"}
-            >
-              {typeof op === "string" ? op : (op?.label ?? "Opción")}
-            </button>
-          ))}
-        </div>
+            <div className="test-options">
+              {opciones.map((op, idx) => (
+                <button
+                  key={idx}
+                  className="btn-opcion"
+                  onClick={() => handleAnswer(op)}
+                  disabled={botonesDeshabilitados}
+                  title={!attemptId ? "Preparando..." : (!editable ? "Intento no editable" : "Seleccionar")}
+                >
+                  {typeof op === "string" ? op : op?.label ?? "Opción"}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="muted">Preparando firma…</div>
+        )}
       </div>
 
-      {/* Botón fijo para leer */}
       <button
         className="fab-read"
         onClick={() => speakPregunta(pregunta?.texto || "")}
@@ -641,8 +595,9 @@ export default function TestViewer() {
       {/* Modal de firma */}
       {showSignModal && (
         <div className="exit-modal">
-          <div className="modal-content" style={{ maxWidth: 760 }}>
+          <div className="modal-content" style={{ maxWidth: 820 }}>
             <h3 style={{ marginTop: 0 }}>Confirmación del paciente</h3>
+
             <p style={{ margin: "8px 0 14px" }}>
               <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                 <input
@@ -654,37 +609,22 @@ export default function TestViewer() {
               </label>
             </p>
 
-            <div style={{ margin: "8px 0 10px" }}>
-              <small style={{ color: "#555" }}>Firma del paciente (use el dedo o el mouse):</small>
-            </div>
-
-            <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, background: "#fafafa" }}>
-              <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "200px", background: "#fff", borderRadius: 6 }} />
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8, gap: 8 }}>
-                <button className="btn-cancel-exit" onClick={clearSignature}>Limpiar</button>
-              </div>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button className="btn-cancel-exit" onClick={() => { /* modal no se cierra sin firmar */ }}>
-                Cancelar
-              </button>
-              <button
-                className="btn-confirm-exit"
-                onClick={() => {
-                  if (!consentChecked) { alert("Debes aceptar la conformidad."); return; }
-                  if (!hasDrawn) { alert("Por favor, agrega la firma del paciente."); return; }
-                  finalizeAttemptAfterSignature();
-                }}
-              >
-                Firmar y finalizar
-              </button>
+            {/* AttemptSignature bloqueado hasta que marque conformidad */}
+            <div style={{ opacity: consentChecked ? 1 : 0.5, pointerEvents: consentChecked ? "auto" : "none" }}>
+              <AttemptSignature
+                supabase={supabase}
+                attemptId={attemptId}
+                signer="paciente"
+                onDone={handleSignatureDone}
+                uploadToStorage={true}
+                storageBucket="evidencias" // igual que usabas antes
+              />
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal contraseña operador (para salir durante la prueba) */}
+      {/* Modal contraseña operador */}
       {askPassOpen && (
         <div className="exit-modal">
           <div className="modal-content" style={{ maxWidth: 420 }}>
@@ -706,8 +646,12 @@ export default function TestViewer() {
                 style={{ width: "100%", padding: 10, marginBottom: 12 }}
               />
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button type="button" className="btn-cancel-exit" onClick={closeAskPassModal}>Cancelar</button>
-                <button type="submit" className="btn-confirm-exit">Confirmar</button>
+                <button type="button" className="btn-cancel-exit" onClick={closeAskPassModal}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn-confirm-exit">
+                  Confirmar
+                </button>
               </div>
             </form>
           </div>
