@@ -3,46 +3,27 @@ import { supabase } from "../lib/supabaseClient";
 import { uploadAnexo } from "../services/uploadAnexo";
 import "../styles/ModalBase.css";
 
-// extensiones CI (Bolivia; ajusta si quieres)
-const CI_EXT = ["LP","CB","SC","OR","PT","TJ","BE","PD","CH","OTRO"];
-
-// selector de nivel educativo
-const NIVELES = [
-  "Primaria", "Secundaria",
-  "Técnico", "Universitario",
-  "Postgrado", "Otro"
-];
+const CI_EXT = ["LP","CB","SC","OR","PT","TJ","BE","PD","CH"];
+const NIVELES = ["Primaria","Secundaria","Técnico","Universitario","Postgrado","Otro"];
 
 export default function ModalPaciente({ initial, onClose, onSaved }) {
   const [form, setForm] = useState({
     id: null,
-
-    // CI
     doc_numero: "",
     doc_expedido: "LP",
-
-    // Identidad
     nombres: "",
     apellidos: "",
-
-    // Demográficos
     sexo: "",
     fecha_nacimiento: "",
-
-    // Opcionales
     nivel_educativo: "",
     ocupacion: "",
     antecedentes: "",
-
-    // Contacto (sin email)
     telefono: "",
     direccion: "",
   });
 
-  // carnet (solo en creación exigimos ambos)
   const [carnetFront, setCarnetFront] = useState(null);
   const [carnetBack, setCarnetBack]   = useState(null);
-
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
@@ -82,50 +63,31 @@ export default function ModalPaciente({ initial, onClose, onSaved }) {
   const guardar = async () => {
     const err = validar();
     if (err) { alert(err); return; }
-
     setSaving(true);
 
-    // payload 1:1 con columnas
     const payload = {
-      doc_tipo: "CI", // fijamos CI por convención
+      doc_tipo: "CI",
       doc_numero: form.doc_numero || null,
       doc_expedido: form.doc_expedido || null,
-
       nombres: form.nombres || null,
       apellidos: form.apellidos || null,
-
       sexo: form.sexo || null,
       fecha_nacimiento: form.fecha_nacimiento || null,
-
       nivel_educativo: form.nivel_educativo || null,
       ocupacion: form.ocupacion || null,
       antecedentes: form.antecedentes || null,
-
-      contacto: {
-        telefono: form.telefono || null,
-        direccion: form.direccion || null,
-      },
+      contacto: { telefono: form.telefono || null, direccion: form.direccion || null },
     };
 
     const user = (await supabase.auth.getUser()).data.user;
     if (!form.id) payload.created_by = user?.id ?? null;
     payload.updated_by = user?.id ?? null;
 
-    // 1) crear/actualizar paciente
     let resp;
     if (!form.id) {
-      resp = await supabase
-        .from("pacientes")
-        .insert(payload)
-        .select("id")
-        .single();
+      resp = await supabase.from("pacientes").insert(payload).select("id").single();
     } else {
-      resp = await supabase
-        .from("pacientes")
-        .update(payload)
-        .eq("id", form.id)
-        .select("id")
-        .single();
+      resp = await supabase.from("pacientes").update(payload).eq("id", form.id).select("id").single();
     }
 
     if (resp.error) {
@@ -137,7 +99,7 @@ export default function ModalPaciente({ initial, onClose, onSaved }) {
 
     const pacienteId = resp.data.id;
 
-    // 2) si es creación, subir carnet (anverso y reverso)
+    // Subida de carnet en creación
     if (!form.id && carnetFront && carnetBack) {
       try {
         const front = await uploadAnexo({
@@ -154,14 +116,9 @@ export default function ModalPaciente({ initial, onClose, onSaved }) {
           titulo: "carnet-reverso",
           descripcion: null,
         });
-
-        // opcional: guardar preview del anverso en pacientes
         await supabase
           .from("pacientes")
-          .update({
-            foto_carnet_bucket: "anexos",
-            foto_carnet_path: front.paths.mediumPath, // preview
-          })
+          .update({ foto_carnet_bucket: "anexos", foto_carnet_path: front.paths.mediumPath })
           .eq("id", pacienteId);
       } catch (e) {
         console.error(e);
@@ -182,23 +139,14 @@ export default function ModalPaciente({ initial, onClose, onSaved }) {
         </div>
 
         <div className="mb-body grid2">
-          {/* CI */}
           <label className="col2">CI</label>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 140px", gap:8 }} className="col2">
-            <input
-              placeholder="Número"
-              value={form.doc_numero}
-              onChange={e=>set("doc_numero", e.target.value)}
-            />
-            <select
-              value={form.doc_expedido}
-              onChange={e=>set("doc_expedido", e.target.value)}
-            >
+            <input placeholder="Número" value={form.doc_numero} onChange={e=>set("doc_numero", e.target.value)} />
+            <select value={form.doc_expedido} onChange={e=>set("doc_expedido", e.target.value)}>
               {CI_EXT.map(x => <option key={x} value={x}>{x}</option>)}
             </select>
           </div>
 
-          {/* Identidad */}
           <label>Nombres
             <input value={form.nombres} onChange={e=>set("nombres", e.target.value)} />
           </label>
@@ -206,7 +154,6 @@ export default function ModalPaciente({ initial, onClose, onSaved }) {
             <input value={form.apellidos} onChange={e=>set("apellidos", e.target.value)} />
           </label>
 
-          {/* Demográficos */}
           <label>Fecha nacimiento
             <input type="date" value={form.fecha_nacimiento ?? ""} onChange={e=>set("fecha_nacimiento", e.target.value)} />
           </label>
@@ -219,7 +166,6 @@ export default function ModalPaciente({ initial, onClose, onSaved }) {
             </select>
           </label>
 
-          {/* Opcionales */}
           <label>Nivel educativo
             <select value={form.nivel_educativo} onChange={e=>set("nivel_educativo", e.target.value)}>
               <option value="">—</option>
@@ -233,7 +179,6 @@ export default function ModalPaciente({ initial, onClose, onSaved }) {
             <textarea value={form.antecedentes} onChange={e=>set("antecedentes", e.target.value)} />
           </label>
 
-          {/* Contacto (sin email) */}
           <label>Teléfono
             <input value={form.telefono} onChange={e=>set("telefono", e.target.value)} />
           </label>
@@ -241,7 +186,6 @@ export default function ModalPaciente({ initial, onClose, onSaved }) {
             <textarea value={form.direccion} onChange={e=>set("direccion", e.target.value)} />
           </label>
 
-          {/* Carnet obligatorio al crear */}
           {!form.id && (
             <>
               <label className="col2" style={{ marginTop:6 }}>Carnet (fotos obligatorias)</label>

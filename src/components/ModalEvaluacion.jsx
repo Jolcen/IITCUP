@@ -1,6 +1,5 @@
-// src/components/ModalEvaluacion.jsx
 import "../styles/ModalEvaluacion.css";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { FaTimes, FaDownload, FaFileAlt, FaUserCircle } from "react-icons/fa";
 import { supabase } from "../lib/supabaseClient";
 import ModalSelectPaciente from "./ModalSelectPaciente";
@@ -81,10 +80,16 @@ export default function ModalEvaluacion({ mode = "view", initialCase, onClose, o
     })();
   }, [isView, initialCase?.paciente_id, initialCase?.id]);
 
-  // pruebas del caso (y preselección en edit)
-// pruebas del caso (y preselección en edit) — robusto si no hay FK
+  // ----------------------------
+  // Pruebas del caso (refactor a función reutilizable + realtime)
+  // ----------------------------
+  const loadCaseTests = useRef(async () => {}).current;
+
+  // define función
+  const setLoadCaseTests = (fn) => { loadCaseTests.current = fn; };
+
   useEffect(() => {
-    (async () => {
+    setLoadCaseTests(async () => {
       if (!initialCase?.id) { setCaseTests([]); return; }
 
       // 1) Traigo los ids de pruebas asignadas
@@ -116,10 +121,30 @@ export default function ModalEvaluacion({ mode = "view", initialCase, onClose, o
       }));
       setCaseTests(arr);
 
-      if (isEdit) setSelPruebas(ids); // <-- preselecciona en EDIT
-    })();
+      if (isEdit) setSelPruebas(ids); // preselecciona en EDIT
+    });
   }, [initialCase?.id, isEdit]);
 
+  // primera carga
+  useEffect(() => { loadCaseTests.current?.(); }, [loadCaseTests]);
+
+  // realtime sobre casos_pruebas del caso abierto (solo en view)
+  useEffect(() => {
+    if (!isView || !initialCase?.id) return;
+    const ch = supabase
+      .channel(`rt-casos_pruebas-${initialCase.id}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "casos_pruebas",
+        filter: `caso_id=eq.${initialCase.id}`
+      }, () => {
+        loadCaseTests.current?.();
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(ch);
+  }, [isView, initialCase?.id]);
 
   // helpers preview
   const openPreview = async (d) => {
@@ -275,7 +300,7 @@ export default function ModalEvaluacion({ mode = "view", initialCase, onClose, o
                       {initialCase?.estado === "asignado" && "Asignado"}
                       {initialCase?.estado === "en_progreso" && "En progreso"}
                       {initialCase?.estado === "completada" && "Completada"}
-                      {initialCase?.estado === "cancelado" && "Cancelado"}
+                      {initialCase?.estado === "cancelada" && "Cancelada"}
                     </span>
                   </span></div>
                   <div className="kv"><span className="k">Creado</span><span className="v">{fmtFecha(initialCase?.creado_en)}</span></div>
@@ -292,6 +317,7 @@ export default function ModalEvaluacion({ mode = "view", initialCase, onClose, o
                           <span className="test-name">{t.nombre}</span>
                           <span className={`chip chip-${t.estado}`}>
                             {t.estado === "pendiente" && "Pendiente"}
+                            {t.estado === "en_progreso" && "En progreso"}
                             {t.estado === "completada" && "Completada"}
                             {t.estado === "omitida" && "Omitida"}
                             {t.estado === "interrumpido" && "Interrumpido"}
@@ -371,7 +397,6 @@ export default function ModalEvaluacion({ mode = "view", initialCase, onClose, o
               <button className="mb-close" onClick={closePreview}>×</button>
             </div>
 
-            {/* ⬇⬇⬇ cambia 'mb-body' por 'mb-body preview-body' */}
             <div className="mb-body preview-body">
               {(preview.mime?.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(preview.name)) ? (
                 <img src={preview.url} alt={preview.name} />

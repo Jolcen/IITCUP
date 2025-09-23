@@ -10,7 +10,6 @@ export const Login = ({ setIsAuthenticated }) => {
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  // Si ya hay sesión, redirige
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -19,77 +18,55 @@ export const Login = ({ setIsAuthenticated }) => {
         navigate('/', { replace: true });
       }
     })();
-  }, []);
+  }, [navigate, setIsAuthenticated]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
     setCargando(true);
 
-    // 1) Login contra Supabase Auth
-    const { data, error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password: clave,
-    });
+    try {
+      // 1) Login en Supabase Auth
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password: clave,
+      });
+      if (authError) throw new Error(authError.message || 'No se pudo iniciar sesión');
 
-    if (authError) {
-      setError(authError.message || 'No se pudo iniciar sesión');
+      const uid = data?.user?.id;
+      if (!uid) throw new Error('No se obtuvo el usuario de la sesión.');
+
+      // 2) Verificar perfil en app_users
+      const { data: perfil, error: perfilError } = await supabase
+        .from('app_users')
+        .select('id, nombre, email, rol')
+        .eq('id', uid)
+        .maybeSingle();
+
+      if (perfilError) throw new Error(perfilError.message);
+      if (!perfil) {
+        setError('Tu cuenta existe en Auth pero no está habilitada en el sistema. Contacta al administrador.');
+        return;
+      }
+
+      // 3) Marcar autenticado y redirigir
+      setIsAuthenticated?.(true);
+      localStorage.setItem('isAuthenticated', 'true');
+      localStorage.setItem('perfil', JSON.stringify(perfil));
+      navigate('/', { replace: true });
+
+    } catch (err) {
+      setError(err.message || 'Error inesperado al iniciar sesión');
+    } finally {
       setCargando(false);
-      return;
     }
-
-    const uid = data?.user?.id;
-    if (!uid) {
-      setError('No se obtuvo el usuario de la sesión.');
-      setCargando(false);
-      return;
-    }
-    
-
-    // 2) Verificar que existe perfil en app_users (rol/habilitado)
-    const { data: perfil, error: perfilError } = await supabase
-      .from('app_users')
-      .select('id, nombre, email, rol')
-      .eq('id', uid)
-      .maybeSingle();
-
-    if (perfilError) {
-      setError(perfilError.message);
-      setCargando(false);
-      return;
-    }
-
-    if (!perfil) {
-      // Usuario existe en Auth pero no está habilitado en tu sistema (app_users)
-      setError('Tu cuenta existe en Auth pero no está habilitada en el sistema. Contacta al administrador.');
-      setCargando(false);
-      return;
-    }
-
-    // (Opcional) Registrar log de login
-    await supabase.rpc('fn_log', {
-      p_accion: 'LOGIN',
-      p_entidad: 'app_users',
-      p_entidad_id: uid,
-    }).catch(() => {}); // ignora error si lo hubiera
-
-    // 3) Marcar autenticado en tu estado local (si tu app lo usa)
-    setIsAuthenticated?.(true);
-    localStorage.setItem('isAuthenticated', 'true'); // si tu layout lo necesita
-
-    // (Opcional) Guardar el perfil para usar el rol en la UI
-    localStorage.setItem('perfil', JSON.stringify(perfil));
-
-    navigate('/', { replace: true });
-    setCargando(false);
   };
 
   return (
     <div className="login-bg">
       <div className="login-container">
-
         <div className="login-image">
-          <img src='static/images/portada.png' alt="Login visual" />
+          <img src="static/images/portada.png" alt="Login visual" />
         </div>
 
         <form className="login-form" onSubmit={handleLogin}>
@@ -100,6 +77,8 @@ export const Login = ({ setIsAuthenticated }) => {
           <h5>Control de Pruebas Psicológicas</h5>
 
           <input
+            id="email"
+            name="email"
             type="email"
             placeholder="E-mail"
             value={email}
@@ -108,6 +87,8 @@ export const Login = ({ setIsAuthenticated }) => {
             autoComplete="email"
           />
           <input
+            id="password"
+            name="password"
             type="password"
             placeholder="Contraseña"
             value={clave}
@@ -118,17 +99,14 @@ export const Login = ({ setIsAuthenticated }) => {
 
           <div className="form-options">
             <label><input type="checkbox" defaultChecked /> Recordarme</label>
-            <a href="#" onClick={(e)=>e.preventDefault()}>¿Olvidó contraseña?</a>
           </div>
 
           <button className="btn-login" type="submit" disabled={cargando}>
             {cargando ? 'Ingresando…' : 'Entrar'}
           </button>
 
-          {error && <p style={{ color:'crimson', fontSize:12, marginTop:8 }}>{error}</p>}
-
+          {error && <p style={{ color: 'crimson', fontSize: 12, marginTop: 8 }}>{error}</p>}
         </form>
-
       </div>
     </div>
   );

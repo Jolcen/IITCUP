@@ -1,8 +1,7 @@
-// src/pages/TestViewer.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
-import AttemptSignature from "../components/AttemptSignature"; // ⬅️ NUEVO
+import AttemptSignature from "../components/AttemptSignature";
 import "../styles/TestViewer.css";
 
 const SLUG2CODE = { pai: "PAI", "mcmi-iv": "MCMI-IV", "mmpi-2": "MMPI-2", custom: "CUSTOM" };
@@ -45,11 +44,11 @@ export default function TestViewer() {
   const operatorPassInputRef = useRef(null);
   const operatorPassName = useMemo(() => "op_" + Math.random().toString(36).slice(2), []);
   const deferredActionRef = useRef(null);
+  const [passSubmitting, setPassSubmitting] = useState(false);
 
-  // Firma (solo consentimiento aquí; la firma real está en AttemptSignature)
+  // Firma
   const [consentChecked, setConsentChecked] = useState(false);
 
-  // clave para limpiar cache local del intento
   const storageKey = useMemo(
     () => (attemptId ? `attempt:${attemptId}:answers` : null),
     [attemptId]
@@ -209,7 +208,7 @@ export default function TestViewer() {
     return creado.id;
   }
 
-  // ------ Cargar prueba + items + progreso desde BD ------
+  // ------ Cargar prueba + items + validación de asignación ------
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -217,7 +216,7 @@ export default function TestViewer() {
         setLoading(true);
         setErr("");
 
-        // 1) id prueba
+        // 1) id prueba por código
         const { data: pruebas, error: eP } = await supabase
           .from("pruebas")
           .select("id, codigo")
@@ -229,8 +228,21 @@ export default function TestViewer() {
         if (!alive) return;
         setPruebaId(pid);
 
-        // 2) Bloquear si ya evaluada/terminada
+        // 2) Validar que la prueba esté asignada al caso
         if (caseId) {
+          const { data: asignada, error: eAsign } = await supabase
+            .from("casos_pruebas")
+            .select("prueba_id")
+            .eq("caso_id", caseId)
+            .eq("prueba_id", pid)
+            .limit(1);
+          if (eAsign) throw eAsign;
+          if (!asignada || !asignada.length) {
+            if (alive) setErr("Esta prueba no está asignada a este caso.");
+            return;
+          }
+
+          // 2b) Bloquear si ya evaluada/terminada
           const { data: comp, error: eComp } = await supabase
             .from("intentos_prueba")
             .select("id, estado, terminado_en")
@@ -245,7 +257,7 @@ export default function TestViewer() {
           }
         }
 
-        // 3) Cargar items de la prueba
+        // 3) Cargar items
         const { data, error } = await supabase
           .from("items_prueba")
           .select("id, enunciado, opciones, inverso, orden, activo, tipo")
@@ -267,12 +279,12 @@ export default function TestViewer() {
         if (!alive) return;
         setItems(mapped);
 
-        // 4) Asegurar (o crear) intento abierto
+        // 4) Asegurar intento abierto
         const atid = await ensureAttempt(pid);
         if (!alive) return;
         setAttemptId(atid);
 
-        // 5) Reconstruir progreso sin localStorage
+        // 5) Progreso
         const { data: resp } = await supabase
           .from("respuestas")
           .select("item_id")
@@ -292,13 +304,17 @@ export default function TestViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testId, caseId]);
 
-  // ------ Iniciar prueba -> estado en_evaluacion (RPC) ------
+  // ------ Iniciar prueba -> RPC: casos_pruebas.en_progreso ------
   async function startTest() {
-    if (!attemptId) return;
+    if (!attemptId || !pruebaId || !caseId) {
+      alert("Preparando la prueba…");
+      return;
+    }
 
+    // 1) cambiar intento a en_evaluacion (tu RPC opcional)
     const { error: rpcErr } = await supabase.rpc("start_intento", { p_id: attemptId });
     if (rpcErr) {
-      console.warn("[startTest] RPC falló, intento fallback .update()", rpcErr);
+      // fallback: update directo si no tienes ese RPC
       const { error: updErr } = await supabase
         .from("intentos_prueba")
         .update({ estado: "en_evaluacion" })
@@ -309,7 +325,17 @@ export default function TestViewer() {
       }
     }
 
-    const nowIso = new Date().toISOString();
+    // 2) marcar la PRUEBA del caso como en_progreso (impacta estado del caso vía trigger)
+    const { error: eCase } = await supabase.rpc("marcar_prueba_en_progreso", {
+      p_caso_id: caseId,
+      p_prueba_id: pruebaId,
+    });
+    if (eCase) {
+      // No bloquee el inicio por esto; deja traza y sigue
+      console.warn("No se pudo marcar en_progreso la prueba del caso:", eCase);
+    }
+
+    // arrancar timer UI
     startedAtRef.current = Date.now();
     if (tickingRef.current) clearInterval(tickingRef.current);
     setTime(0);
@@ -328,7 +354,6 @@ export default function TestViewer() {
       return;
     }
 
-    // Snapshot por seguridad de UI
     const idxSnapshot = currentIndex;
     const q = items[idxSnapshot];
     if (!q) return;
@@ -359,7 +384,6 @@ export default function TestViewer() {
     } catch (e) {
       console.error("Excepción guardando respuesta:", e);
     } finally {
-      // Avanza al siguiente ítem
       setCurrentIndex((i) => {
         const next = i + 1;
         return next >= items.length ? next : next;
@@ -374,18 +398,30 @@ export default function TestViewer() {
     setShowSignModal(true);
   }
 
-  // Lo que pasa cuando AttemptSignature termina bien
-  const handleSignatureDone = () => {
-    // triggers en DB hacen: validar completo, calcular puntajes, poner 'evaluado', etc.
+  // Al terminar firma → marcar PRUEBA como completada + UI
+  const handleSignatureDone = async () => {
     try {
-      if (storageKey) localStorage.removeItem(storageKey);
-    } catch {}
+      if (pruebaId && caseId) {
+        const { error } = await supabase.rpc("actualizar_estado_prueba_y_caso", {
+          p_caso_id: caseId,
+          p_prueba_id: pruebaId,
+          p_estado: "completada",
+        });
+        if (error) {
+          console.warn("No se pudo marcar la prueba como completada:", error);
+        }
+      }
+    } catch (e) {
+      console.warn("RPC completar falló:", e);
+    }
+
+    try { if (storageKey) localStorage.removeItem(storageKey); } catch {}
     if (tickingRef.current) clearInterval(tickingRef.current);
     setShowSignModal(false);
     setShowFinishScreen(true);
   };
 
-  // ====== Modal contraseña operador (re-autenticación real) ======
+  // ====== Modal contraseña operador ======
   function openAskPassModal(onSuccess) {
     deferredActionRef.current = onSuccess;
     setAskPassOpen(true);
@@ -398,10 +434,6 @@ export default function TestViewer() {
     setAskPassOpen(false);
     if (operatorPassInputRef.current) operatorPassInputRef.current.value = "";
   }
-  // estado nuevo arriba del componente:
-  const [passSubmitting, setPassSubmitting] = useState(false);
-
-  // reemplaza tu handleOperatorPassSubmit por este:
   function handleOperatorPassSubmit(e) {
     e.preventDefault();
     (async () => {
@@ -421,9 +453,7 @@ export default function TestViewer() {
         });
 
         if (error) {
-          // 400 = credenciales inválidas
           if (error.status === 400) {
-            // feedback sutil sin alert
             operatorPassInputRef.current?.setCustomValidity("Contraseña incorrecta");
             operatorPassInputRef.current?.reportValidity();
             operatorPassInputRef.current?.setCustomValidity("");
@@ -434,7 +464,6 @@ export default function TestViewer() {
           return;
         }
 
-        // OK → ejecuta la acción diferida y cierra
         const cb = deferredActionRef.current;
         closeAskPassModal();
         deferredActionRef.current = null;
@@ -609,7 +638,6 @@ export default function TestViewer() {
               </label>
             </p>
 
-            {/* AttemptSignature bloqueado hasta que marque conformidad */}
             <div style={{ opacity: consentChecked ? 1 : 0.5, pointerEvents: consentChecked ? "auto" : "none" }}>
               <AttemptSignature
                 supabase={supabase}
@@ -617,7 +645,7 @@ export default function TestViewer() {
                 signer="paciente"
                 onDone={handleSignatureDone}
                 uploadToStorage={true}
-                storageBucket="evidencias" // igual que usabas antes
+                storageBucket="evidencias"
               />
             </div>
           </div>
@@ -649,8 +677,8 @@ export default function TestViewer() {
                 <button type="button" className="btn-cancel-exit" onClick={closeAskPassModal}>
                   Cancelar
                 </button>
-                <button type="submit" className="btn-confirm-exit">
-                  Confirmar
+                <button type="submit" className="btn-confirm-exit" disabled={passSubmitting}>
+                  {passSubmitting ? "Verificando…" : "Confirmar"}
                 </button>
               </div>
             </form>

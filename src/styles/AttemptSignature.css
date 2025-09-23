@@ -69,3 +69,13 @@
   color: #6b7280;
   font-size: 13px;
 }
+
+
+.sig__canvasWrap{ width:100%; height:220px; box-sizing:border-box; }
+.sig__canvas{ width:100%; height:100%; display:block; }
+.sig__buttons{ display:flex; gap:.5rem; margin-top:.75rem; }
+.sig__btn{ padding:.5rem .9rem; border-radius:.5rem; }
+.sig__btnPrimary{ background:#16a34a; color:#fff; }
+.sig__btnSecondary{ background:#e5e7eb; }
+.sig__error{ color:#b91c1c; margin-top:.5rem; font-size:.9rem; }
+.sig__hint{ color:#6b7280; margin-top:.25rem; font-size:.85rem; }

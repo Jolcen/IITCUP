@@ -136,6 +136,7 @@ export default function Tests() {
     return () => { alive = false; };
   }, [caseId]);
 
+  // selección inicial
   useEffect(() => {
     if (suggested && assignedBySlug[suggested] && !doneBySlug[suggested]) {
       setSelectedId(suggested);

@@ -135,6 +135,7 @@ export default function Evaluaciones() {
   const closeModal = () => setModal({ open: false, mode: "create", initialCase: null });
 
   const handleRealizar = (r) => {
+    // OJO: el viewer deberá elegir prueba y llamar a los RPC de progreso/completado.
     const params = new URLSearchParams({
       case: r.id,
       nombre: r.paciente_nombre ?? "",

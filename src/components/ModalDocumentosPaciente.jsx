@@ -4,9 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 import { uploadAnexo } from "../services/uploadAnexo";
 import "../styles/ModalBase.css";
 
-// Tipos de documento que manejas
 const TIPOS = [
-  "carnet",
   "cert_medico",
   "cert_psicologico",
   "antecedentes_policiales",
@@ -14,50 +12,39 @@ const TIPOS = [
   "otros",
 ];
 
-// Derivar la ruta del preview (medium.jpg) a partir del original
+const TIPOS_TITULO = {
+  carnet: "Carnet de Identidad",
+  cert_medico: "Certificado Médico",
+  cert_psicologico: "Certificado Psicológico",
+  antecedentes_policiales: "Antecedentes Policiales",
+  antecedentes_penales: "Antecedentes Penales",
+  otros: "Otros",
+};
+
+// Deriva el preview/medium a partir del original subido por uploadAnexo
 function previewPathFromOriginal(originalPath) {
-  // original esperado: pacientes/{paciente_id}/{anexo_id}/original/archivo.ext
   const parts = (originalPath || "").split("/");
   if (parts.length < 5) return null;
-  // base: pacientes/{paciente_id}/{anexo_id}
   const base = parts.slice(0, 3).join("/");
   return `${base}/preview/medium.jpg`;
 }
 
 export default function ModalDocumentosPaciente({ paciente, onClose, onSaved }) {
-  const [tipo, setTipo] = useState("carnet");
-  const [casoId, setCasoId] = useState(""); // vacío = sin caso
-  const [casos, setCasos] = useState([]);
+  // Tipo por defecto usado al AGREGAR (no al subir)
+  const [tipoDefault, setTipoDefault] = useState(TIPOS[0]);
 
-  const [pendientes, setPendientes] = useState([]); // [{id, file}]
-  const [existentes, setExistentes] = useState([]); // anexos ya subidos (enriquecidos)
+  // Pendientes ahora guardan su propio tipo
+  // [{ id, file, tipo }]
+  const [pendientes, setPendientes] = useState([]);
+  const [existentes, setExistentes] = useState([]);
   const [subiendo, setSubiendo] = useState(false);
   const [cargando, setCargando] = useState(true);
 
-  // Cargar casos del paciente (para asignar opcionalmente)
-  useEffect(() => {
-    const loadCasos = async () => {
-      const { data, error } = await supabase
-        .from("casos")
-        .select("id, motivacion, estado, creado_en")
-        .eq("paciente_id", paciente.id)
-        .order("creado_en", { ascending: false });
-      if (error) {
-        console.error(error);
-        setCasos([]);
-        return;
-      }
-      setCasos(data || []);
-    };
-    loadCasos();
-  }, [paciente?.id]);
-
-  // Cargar anexos ya subidos
   const cargarAnexos = async () => {
     setCargando(true);
     const { data, error } = await supabase
       .from("anexos")
-      .select("id, titulo, tipo, mime_type, size_bytes, bucket, path, created_at, caso_id")
+      .select("id, titulo, tipo, mime_type, size_bytes, bucket, path, created_at")
       .eq("paciente_id", paciente.id)
       .order("created_at", { ascending: false });
 
@@ -88,39 +75,47 @@ export default function ModalDocumentosPaciente({ paciente, onClose, onSaved }) 
 
   useEffect(() => { cargarAnexos(); }, [paciente?.id]);
 
-  // Agregar archivos a "Pendientes"
+  // Agregar archivos: cada uno con su tipo propio inicial = tipoDefault actual
   const onInput = (e) => {
     const arr = Array.from(e.target.files || []);
-    const nuevos = arr.map(f => ({ id: crypto.randomUUID(), file: f }));
+    const nuevos = arr.map(f => ({
+      id: (crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`),
+      file: f,
+      tipo: tipoDefault, // << capturamos el tipo actual como valor inicial de ESTE archivo
+    }));
     setPendientes(prev => [...prev, ...nuevos]);
-    e.target.value = ""; // limpia input
+    e.target.value = "";
   };
 
-  const removePendiente = (id) => setPendientes(prev => prev.filter(f => f.id !== id));
+  const removePendiente = (id) =>
+    setPendientes(prev => prev.filter(f => f.id !== id));
 
-  // Subir pendientes
+  // Cambiar el tipo de un archivo pendiente
+  const changeTipoPendiente = (id, nuevoTipo) =>
+    setPendientes(prev => prev.map(p => p.id === id ? { ...p, tipo: nuevoTipo } : p));
+
+  // Subir cada archivo con su tipo particular
   const subir = async () => {
     if (pendientes.length === 0) return;
 
-    // Validaciones simples (respetar MIME del bucket)
+    // Validaciones
     for (const p of pendientes) {
       const t = p.file.type || "";
-      if (!(t.startsWith("image/jpeg") || t.startsWith("image/png") || t === "application/pdf" || t.startsWith("image/"))) {
-        alert(`Tipo no permitido: ${t}`);
-        return;
-      }
+      const permitido = t === "application/pdf" || t.startsWith("image/");
+      if (!permitido) { alert(`Tipo no permitido: ${t}`); return; }
+      if (!p.tipo) { alert("Hay archivos pendientes sin tipo seleccionado."); return; }
     }
 
     setSubiendo(true);
     try {
       for (const item of pendientes) {
+        const tituloLogico = TIPOS_TITULO[item.tipo] || item.tipo;
         await uploadAnexo({
           pacienteId: paciente.id,
           file: item.file,
-          tipo,
-          titulo: item.file.name,
+          tipo: item.tipo,     // << usa el tipo propio del item
+          titulo: tituloLogico,
           descripcion: null,
-          casoId: casoId || null, // <- puede ser null (documento del paciente)
         });
       }
       await cargarAnexos();
@@ -135,14 +130,10 @@ export default function ModalDocumentosPaciente({ paciente, onClose, onSaved }) 
     }
   };
 
-  // Eliminar un anexo (archivo(s) + fila)
   const eliminar = async (a) => {
     if (!confirm("¿Eliminar este documento?")) return;
-
     try {
       const bucket = a.bucket || "anexos";
-
-      // borrar original + previews si existen
       const previewPath = previewPathFromOriginal(a.path);
       const toRemove = [a.path];
       if (previewPath) {
@@ -150,11 +141,8 @@ export default function ModalDocumentosPaciente({ paciente, onClose, onSaved }) 
         toRemove.push(previewPath, thumbPath);
       }
       await supabase.storage.from(bucket).remove(toRemove);
-
-      // borrar fila (si tienes política DELETE en public.anexos)
       const { error } = await supabase.from("anexos").delete().eq("id", a.id);
       if (error) throw error;
-
       await cargarAnexos();
     } catch (err) {
       console.error(err);
@@ -163,9 +151,18 @@ export default function ModalDocumentosPaciente({ paciente, onClose, onSaved }) 
   };
 
   const totalPend = useMemo(
-    () => pendientes.reduce((s, p) => s + p.file.size, 0),
+    () => pendientes.reduce((s, p) => s + (p.file?.size || 0), 0),
     [pendientes]
   );
+
+  // Resumen por tipo (para info)
+  const resumenPorTipo = useMemo(() => {
+    const m = new Map();
+    for (const p of pendientes) {
+      m.set(p.tipo, (m.get(p.tipo) || 0) + 1);
+    }
+    return Array.from(m.entries()); // [ [tipo, count], ... ]
+  }, [pendientes]);
 
   return (
     <div className="mb-backdrop" onClick={onClose}>
@@ -176,25 +173,8 @@ export default function ModalDocumentosPaciente({ paciente, onClose, onSaved }) 
         </div>
 
         <div className="mb-body">
-          {/* Filtros superiores */}
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
-            <label>Tipo de documento:
-              <select value={tipo} onChange={(e)=>setTipo(e.target.value)}>
-                {TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </label>
+          {/* Selector de tipo por defecto para NUEVOS archivos */}
 
-            <label>Asociar a caso:
-              <select value={casoId} onChange={(e)=>setCasoId(e.target.value)}>
-                <option value="">— Sin caso (del paciente) —</option>
-                {casos.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.motivacion || c.id} · {c.estado}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
 
           {/* Drop simple */}
           <div className="drop" style={{ marginBottom: 12 }}>
@@ -206,21 +186,34 @@ export default function ModalDocumentosPaciente({ paciente, onClose, onSaved }) 
             <h4 style={{ margin: "8px 0" }}>Pendientes</h4>
             {pendientes.length === 0 && <div className="muted">No hay archivos pendientes</div>}
             {pendientes.length > 0 && (
-              <ul className="doc-list">
-                {pendientes.map(p => (
-                  <li key={p.id}>
-                    <span>
-                      {p.file.name} <small>({(p.file.size/1024).toFixed(1)} KB)</small>
+              <>
+                <ul className="doc-list">
+                  {pendientes.map(p => (
+                    <li key={p.id} style={{ display:"grid", gridTemplateColumns:"1fr 220px auto", alignItems:"center", gap:12 }}>
+                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {p.file.name} <small>({(p.file.size/1024).toFixed(1)} KB)</small>
+                      </span>
+                      <label style={{ display:"flex", alignItems:"center", gap:6 }}>
+                        <span className="muted" style={{ fontSize:12 }}>Tipo:</span>
+                        <select value={p.tipo} onChange={(e)=>changeTipoPendiente(p.id, e.target.value)}>
+                          {TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </label>
+                      <button className="btn-light" onClick={()=>removePendiente(p.id)}>Quitar</button>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="muted" style={{ marginTop: 6 }}>
+                  Total: {(totalPend/1024).toFixed(1)} KB
+                  {resumenPorTipo.length > 0 && " — Por tipo: "}
+                  {resumenPorTipo.map(([t, c], i) => (
+                    <span key={t}>
+                      {i>0 && " · "}{t}: {c}
                     </span>
-                    <button className="btn-light" onClick={()=>removePendiente(p.id)}>Quitar</button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {pendientes.length > 0 && (
-              <div className="muted" style={{ marginTop: 4 }}>
-                Total: {(totalPend/1024).toFixed(1)} KB — Tipo aplicado: <strong>{tipo}</strong>{casoId ? ` — Caso: ${casoId}` : " — Sin caso"}
-              </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
 
@@ -250,7 +243,7 @@ export default function ModalDocumentosPaciente({ paciente, onClose, onSaved }) 
                       {a.titulo || a.tipo}
                     </div>
                     <div className="muted" style={{ fontSize:12 }}>
-                      {a.tipo} · {(a.size_bytes/1024).toFixed(1)} KB {a.caso_id ? `· Caso: ${a.caso_id}` : "· Sin caso"}
+                      {a.tipo} · {(a.size_bytes/1024).toFixed(1)} KB
                     </div>
                   </div>
 

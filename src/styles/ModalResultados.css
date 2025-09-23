@@ -132,3 +132,26 @@
   .mr-grid { grid-template-columns: 1fr; }
   .mr-card__imgwrap { height: 200px; }
 }
+
+/* contenedor de tarjetas */
+.mr-grid{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  justify-content: center;   /* 👈 centra horizontalmente */
+  align-items: stretch;      /* misma altura visual */
+  margin-top: 8px;
+}
+
+/* ancho “estable” para cada tarjeta */
+.mr-card{
+  width: 260px;              /* o 240–280px a tu gusto */
+}
+
+/* acciones abajo del modal */
+.mr-actions{
+  display: flex;
+  gap: 8px;
+  justify-content: center;   /* 👈 centra los botones */
+  margin-top: 12px;
+}

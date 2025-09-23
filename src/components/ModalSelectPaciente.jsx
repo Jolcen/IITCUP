@@ -1,4 +1,3 @@
-// src/components/ModalSelectPaciente.jsx
 import { useEffect, useMemo, useState } from "react";
 import "../styles/ModalBase.css";
 import { supabase } from "../lib/supabaseClient";

@@ -137,6 +137,7 @@ export default function Pacientes() {
       {docs.open && (
         <ModalDocumentosPaciente
           paciente={docs.paciente}
+          allowCase={false}       
           onClose={()=>setDocs({open:false, paciente:null})}
           onSaved={onGuardarDocs}
         />
