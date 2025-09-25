@@ -1,124 +1,179 @@
 /* TestViewer.css */
+
+/* -------- Helpers -------- */
 body.focus-test .sidebar,
 body.focus-test .app-sidebar,
 body.focus-test .layout-sidebar {
   display: none !important;
 }
 
+:root {
+  --topbar-h: 56px;
+  --card-w: min(1080px, 96vw);
+  --card-h: clamp(460px, 76dvh, 820px);
+}
+
+/* -------- Layout general -------- */
 .test-topbar-container {
   background-color: #f6f7fb;
   min-height: 100vh;
+  display: grid;
+  grid-template-rows: var(--topbar-h) 1fr;
   position: relative;
 }
 
-.test-topbar {
-  display: flex;
+/* Topbar centrada con cruz a la derecha */
+.test-topbar{
+  display: grid;
+  grid-template-columns: 1fr auto 1fr; /* izq | título | der */
   align-items: center;
-  justify-content: space-between;
-  background-color: white;
-  padding: 10px 20px;
-  box-shadow: 0px 1px 4px rgba(0,0,0,0.08);
+  background: #fff;
+  padding: 8px 14px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
   position: sticky;
   top: 0;
   z-index: 20;
 }
 
-.btn-exit {
+/* Título centrado REAL: no se mueve aunque haya botón a la derecha */
+.test-topbar-title{
+  justify-self: center;
+  text-align: center;
+  font-weight: 800;
+  letter-spacing: .3px;
+  color: #0f172a;
+  font-size: clamp(16px, 2vw, 20px);
+}
+
+/* Cruz de salida */
+.btn-exit{
+  justify-self: end;
   background: transparent;
   border: none;
   font-size: 20px;
   color: #ef4444;
   cursor: pointer;
+  transition: transform .15s ease, color .15s ease;
 }
+.btn-exit:hover{ color:#dc2626; transform:scale(1.12); }
+.btn-exit:active{ transform:scale(.95); }
 
-/* Contenedor principal */
+
+/* -------- Tarjeta central -------- */
 .test-container {
+  align-self: center;
+  justify-self: center;
+  width: var(--card-w);
+  min-height: var(--card-h);
   background: #fff;
-  padding: clamp(20px, 3vw, 32px);
-  max-width: 900px;
-  margin: 24px auto;
-  border-radius: 14px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+  border-radius: 16px;
+  box-shadow: 0 12px 38px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e9eef4;
+  padding: clamp(18px, 3.2vw, 28px);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 12px;
+  margin: 16px auto;
 }
 
 .test-header {
   display: flex;
-  gap: 16px;
   align-items: center;
-  margin-bottom: 18px;
+  justify-content: flex-start;
 }
 
 .test-title {
-  font-size: clamp(18px, 2.4vw, 24px);
-  margin: 0;
+  font-size: clamp(18px, 2.3vw, 22px);
   font-weight: 800;
-  letter-spacing: .2px;
+  margin: 0;
   color: #0f172a;
+  letter-spacing: 0.2px;
 }
 
-.test-paciente { margin-left: auto; color: #475569; }
+.test-paciente {
+  margin-left: auto;
+  color: #475569;
+  font-size: 14px;
+}
 
-/* PREGUNTA GRANDE Y LEGIBLE */
+/* -------- Pregunta -------- */
 .test-question {
   display: flex;
-  justify-content: center;
   align-items: center;
-  margin: 12px 0 22px;
+  justify-content: center;
+  min-height: clamp(140px, 28vh, 320px);
+  margin: 4px 0 0;
 }
 
 .test-question-text {
-  font-size: clamp(22px, 3.4vw, 30px);
+  font-size: clamp(22px, 3.5vw, 32px);
   line-height: 1.35;
-  font-weight: 700;
+  font-weight: 800;
   color: #0b1324;
-  letter-spacing: .2px;
   text-wrap: balance;
-  max-width: 75ch;
+  max-width: 72ch;
+  text-align: center;
 }
 
-/* Opciones */
+/* -------- Opciones -------- */
 .test-options {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
+  align-items: center;
   gap: 14px;
-  margin-bottom: 6px;
+  min-height: 82px;
+  padding-top: 2px;
 }
 
 .btn-opcion {
-  background-color: #fff7f0;
+  background: #fff7f0;
   border: 2px solid #f58220;
   padding: 12px 22px;
   font-size: 16px;
   border-radius: 10px;
   cursor: pointer;
-  transition: transform .06s ease, box-shadow .12s ease, background-color .2s;
-  box-shadow: 0 4px 10px rgba(245,130,32,.12);
+  transition: transform 0.06s, box-shadow 0.12s, background-color 0.2s;
+  box-shadow: 0 4px 10px rgba(245, 130, 32, 0.12);
+  min-width: 124px;
 }
-.btn-opcion:hover { background-color: #ffe5cc; transform: translateY(-1px); }
-.btn-opcion:active { transform: translateY(0); }
+.btn-opcion:hover {
+  background: #ffe5cc;
+  transform: translateY(-1px);
+}
+.btn-opcion:active {
+  transform: translateY(0);
+}
 
-/* FAB: botón fijo para leer la pregunta */
+/* -------- Botón lector (FAB) -------- */
 .fab-read {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
+  right: max(24px, env(safe-area-inset-right));
+  bottom: max(24px, env(safe-area-inset-bottom));
   width: 58px;
   height: 58px;
   border-radius: 50%;
   border: none;
   background: #10b981;
   color: #fff;
-  font-size: 24px;
-  box-shadow: 0 10px 24px rgba(16,185,129,.28);
+  font-size: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 24px rgba(16, 185, 129, 0.28);
   cursor: pointer;
-  z-index: 40;
-  transition: transform .06s ease, filter .12s ease;
+  z-index: 100;
+  transition: transform 0.08s ease, filter 0.12s ease;
 }
-.fab-read:hover { filter: brightness(.98); transform: translateY(-1px); }
-.fab-read:active { transform: translateY(0); }
+.fab-read:hover {
+  filter: brightness(0.95);
+  transform: translateY(-2px);
+}
+.fab-read:active {
+  transform: translateY(0);
+}
 
-/* Pantalla de inicio (preStart) */
+/* -------- Pantalla inicio -------- */
 .focus-wrap {
   position: fixed;
   inset: 0;
@@ -130,18 +185,24 @@ body.focus-test .layout-sidebar {
 
 .focus-card {
   width: min(620px, 92vw);
-  background: #ffffff;
+  background: #fff;
   border-radius: 18px;
   padding: 28px 26px;
-  box-shadow: 0 18px 60px rgba(0,0,0,0.15);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.15);
   text-align: center;
   border: 1px solid #e5e7eb;
-  animation: popin .18s ease-out;
+  animation: popin 0.18s ease-out;
 }
 
 @keyframes popin {
-  from { transform: scale(.96); opacity: .4; }
-  to   { transform: scale(1);   opacity: 1; }
+  from {
+    transform: scale(0.96);
+    opacity: 0.4;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .focus-title {
@@ -150,17 +211,19 @@ body.focus-test .layout-sidebar {
   color: #0f172a;
   font-weight: 800;
 }
-.focus-sub { color: #475569; margin-bottom: 14px; }
-
 .focus-bullets {
   text-align: left;
   margin: 8px 0 16px;
   color: #334155;
 }
-.focus-bullets li { margin: 6px 0; }
-
-.focus-actions { display: flex; justify-content: center; gap: 10px; }
-
+.focus-bullets li {
+  margin: 6px 0;
+}
+.focus-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
 .btn-start {
   background: #10b981;
   color: #fff;
@@ -169,285 +232,123 @@ body.focus-test .layout-sidebar {
   padding: 12px 18px;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 6px 14px rgba(16,185,129,.25);
+  box-shadow: 0 6px 14px rgba(16, 185, 129, 0.25);
 }
-.btn-start:hover { filter: brightness(.98); transform: translateY(-1px); }
-.btn-start:active { transform: translateY(0); }
+.btn-start:hover {
+  filter: brightness(0.98);
+  transform: translateY(-1px);
+}
 
-.btn-cancel {
-  background: #f3f4f6;
-  color: #111827;
+/* -------- Pantalla final -------- */
+.finish-wrap {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  z-index: 999;
+}
+.finish-card {
+  width: min(560px, 92vw);
+  background: #fff;
+  border-radius: 18px;
+  padding: 28px 26px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.15);
+  text-align: center;
   border: 1px solid #e5e7eb;
+  animation: popin 0.18s ease-out;
+}
+.finish-icon {
+  font-size: 56px;
+  line-height: 1;
+  margin-bottom: 10px;
+}
+.finish-title {
+  font-size: clamp(26px, 3vw, 34px);
+  margin: 0 0 8px;
+  color: #0f172a;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+.btn-back {
+  background: #10b981;
+  color: #fff;
+  border: none;
   border-radius: 10px;
   padding: 12px 18px;
   font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 6px 14px rgba(16, 185, 129, 0.25);
+}
+.btn-back:hover {
+  filter: brightness(0.98);
+  transform: translateY(-1px);
 }
 
-/* Loader y finalización (reutiliza tu CSS previo si lo deseas) */
-.loader { padding: 36px; text-align: center; font-weight: 600; color: #0f172a; }
-
-/* (Opcional) Tu pantalla de finalización previa sigue funcionando */
-.finish-wrap { position: fixed; inset: 0; display: grid; place-items: center; background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%); z-index: 999; }
-.finish-card { width: min(560px, 92vw); background: #ffffff; border-radius: 18px; padding: 28px 26px; box-shadow: 0 18px 60px rgba(0,0,0,0.15); text-align: center; border: 1px solid #e5e7eb; animation: popin .18s ease-out; }
-.finish-icon { font-size: 56px; line-height: 1; margin-bottom: 10px; }
-.finish-title { font-size: clamp(26px, 3vw, 34px); margin: 0 0 8px; color: #0f172a; font-weight: 800; letter-spacing: .2px; }
-.btn-back { background: #10b981; color: #fff; border: none; border-radius: 10px; padding: 12px 18px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 14px rgba(16,185,129,.25); }
-.btn-back:hover { filter: brightness(.98); transform: translateY(-1px); }
-
-/* ampliar ancho útil (cambiar max-width de 900px a 1080px) */
-.test-container {
-  max-width: 1080px; /* ← antes 900px */
+/* -------- Modal de salida -------- */
+.exit-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.36);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
 }
-
-/* topbar sin logo, título centrado */
-.test-topbar {
-  display: grid;           /* para centrar con comodidad */
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-}
-.test-topbar-title {
-  font-weight: 800;
-  letter-spacing: .3px;
-  color: #0f172a;
-  text-align: center;
-  font-size: clamp(16px, 2vw, 20px);
-}
-
-/* fijar altura para evitar saltos entre ítems */
-.test-question {
-  min-height: clamp(140px, 18vh, 220px);  /* asegura área para enunciado */
-}
-.test-options {
-  min-height: 72px;         /* asegura espacio de botones */
-}
-.btn-opcion {
-  min-width: 120px;         /* tamaño consistente */
-}
-
-/* (opcional) reduce un poco el margen inferior del contenedor */
-.test-container { margin: 16px auto; }
-
-/* botón leer (ya estaba definido) */
-/* TestViewer.css — versión adaptativa y centrada */
-
-/* Oculta sidebars del layout principal cuando se rinde el test */
-body.focus-test .sidebar,
-body.focus-test .app-sidebar,
-body.focus-test .layout-sidebar { display: none !important; }
-
-/* --------- Variables y helpers --------- */
-:root{
-  --topbar-h: 56px;
-  --card-w:  min(1120px, 96vw);
-  --card-h:  clamp(460px, 76dvh, 820px); /* altura objetivo de la tarjeta */
-}
-
-/* Contenedor de toda la vista: topbar + área principal centrada */
-.test-topbar-container{
-  background-color:#f6f7fb;
-  min-height:100vh;
-  min-height:100dvh;                 /* navegadores modernos */
-  display:grid;
-  grid-template-rows: var(--topbar-h) 1fr;
-  position:relative;
-}
-
-/* Barra superior sin logo, título centrado */
-.test-topbar{
-  height:var(--topbar-h);
-  display:grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items:center;
-  background:#fff;
-  padding:0 14px;
-  box-shadow:0 1px 4px rgba(0,0,0,.08);
-  position:sticky; top:0; z-index:20;
-}
-.test-topbar-title{
-  font-weight:800; letter-spacing:.3px; color:#0f172a;
-  text-align:center; font-size:clamp(16px, 2vw, 20px);
-}
-.btn-exit{
-  justify-self:end;
-  background:transparent; border:none; font-size:20px;
-  color:#ef4444; cursor:pointer;
-}
-
-/* ---------- Tarjeta central: SIEMPRE CENTRADA y grande ---------- */
-.test-container{
-  align-self:center; justify-self:center;   /* centra dentro del grid padre */
-  width:var(--card-w);
-  min-height:var(--card-h);
-  background:#fff;
-  border-radius:16px;
-  box-shadow:0 12px 38px rgba(0,0,0,.08);
-  border:1px solid #e9eef4;
-  padding:clamp(18px, 3.2vw, 28px);
-  display:grid;
-  grid-template-rows: auto 1fr auto;       /* header | pregunta | opciones */
-  gap:12px;
-}
-
-/* Cabecera de la tarjeta */
-.test-header{
-  display:flex; align-items:center; justify-content:flex-start;
-}
-.test-title{
-  font-size:clamp(18px, 2.3vw, 22px);
-  font-weight:800; margin:0; color:#0f172a; letter-spacing:.2px;
-}
-
-/* Área de la pregunta: ocupa el espacio flexible y centra el texto */
-.test-question{
-  display:flex; align-items:center; justify-content:center;
-  min-height: clamp(140px, 28vh, 320px);   /* asegura altura estable */
-  margin:4px 0 0;
-}
-.test-question-text{
-  font-size: clamp(22px, 3.5vw, 32px);
-  line-height:1.35; font-weight:800; color:#0b1324; letter-spacing:.2px;
-  text-wrap:balance; max-width: 72ch; text-align:center;
-}
-
-/* Opciones: “fijas” para evitar saltos entre ítems */
-.test-options{
-  display:flex; flex-wrap:wrap; justify-content:center; align-items:center;
-  gap:14px;
-  min-height: 82px;                       /* altura mínima estable */
-  padding-top: 2px;
-}
-.btn-opcion{
-  background:#fff7f0; border:2px solid #f58220;
-  padding:12px 22px; font-size:16px; border-radius:10px;
-  cursor:pointer; transition:transform .06s, box-shadow .12s, background-color .2s;
-  box-shadow:0 4px 10px rgba(245,130,32,.12);
-  min-width:124px;                        /* ancho mínimo consistente */
-}
-.btn-opcion:hover{ background:#ffe5cc; transform:translateY(-1px); }
-.btn-opcion:active{ transform:translateY(0); }
-
-/* Botón flotante para leer la pregunta (respeta safe-area) */
-.fab-read{
-  position:fixed; right: max(24px, env(safe-area-inset-right));
-  bottom: max(24px, env(safe-area-inset-bottom));
-  width:58px; height:58px; border-radius:50%; border:none;
-  background:#10b981; color:#fff; font-size:24px;
-  box-shadow:0 10px 24px rgba(16,185,129,.28);
-  cursor:pointer; z-index:40; transition:transform .06s, filter .12s;
-}
-.fab-read:hover{ filter:brightness(.98); transform:translateY(-1px); }
-.fab-read:active{ transform:translateY(0); }
-
-/* -------- Pantalla de inicio (preStart) -------- */
-.focus-wrap{
-  position:fixed; inset:0; display:grid; place-items:center;
-  background:linear-gradient(180deg,#f8fafc 0%, #eef2f7 100%); z-index:999;
-}
-.focus-card{
-  width:min(620px, 92vw); background:#fff; border-radius:18px;
-  padding:28px 26px; box-shadow:0 18px 60px rgba(0,0,0,.15);
-  text-align:center; border:1px solid #e5e7eb; animation:popin .18s ease-out;
-}
-@keyframes popin{ from{transform:scale(.96); opacity:.4;} to{transform:scale(1); opacity:1;} }
-.focus-title{ font-size:clamp(24px, 3vw, 32px); margin:10px 0 6px; color:#0f172a; font-weight:800; }
-.focus-bullets{ text-align:left; margin:8px 0 16px; color:#334155; }
-.focus-bullets li{ margin:6px 0; }
-.focus-actions{ display:flex; justify-content:center; gap:10px; }
-.btn-start{ background:#10b981; color:#fff; border:none; border-radius:10px; padding:12px 18px; font-weight:700; cursor:pointer; box-shadow:0 6px 14px rgba(16,185,129,.25); }
-.btn-start:hover{ filter:brightness(.98); transform:translateY(-1px); }
-.btn-cancel{ background:#f3f4f6; color:#111827; border:1px solid #e5e7eb; border-radius:10px; padding:12px 18px; font-weight:700; cursor:pointer; }
-
-/* Loader */
-.loader{ padding:36px; text-align:center; font-weight:600; color:#0f172a; }
-
-/* -------- Pantalla final -------- */
-.finish-wrap{ position:fixed; inset:0; display:grid; place-items:center; background:linear-gradient(180deg,#f8fafc 0%, #f1f5f9 100%); z-index:999; }
-.finish-card{ width:min(560px, 92vw); background:#fff; border-radius:18px; padding:28px 26px; box-shadow:0 18px 60px rgba(0,0,0,.15); text-align:center; border:1px solid #e5e7eb; animation:popin .18s ease-out; }
-.finish-icon{ font-size:56px; line-height:1; margin-bottom:10px; }
-.finish-title{ font-size:clamp(26px, 3vw, 34px); margin:0 0 8px; color:#0f172a; font-weight:800; letter-spacing:.2px; }
-.btn-back{ background:#10b981; color:#fff; border:none; border-radius:10px; padding:12px 18px; font-weight:700; cursor:pointer; box-shadow:0 6px 14px rgba(16,185,129,.25); }
-.btn-back:hover{ filter:brightness(.98); transform:translateY(-1px); }
-
-/* -------- Modales (firma / pass) — estilos básicos heredados -------- */
-.exit-modal{
-  position:fixed; inset:0; background:rgba(0,0,0,.36);
-  display:grid; place-items:center; z-index:1000;
-}
-.modal-content{
-  width:min(720px, 96vw); background:#fff; border-radius:12px; padding:18px;
-  box-shadow:0 18px 60px rgba(0,0,0,.25);
-}
-.btn-cancel-exit{ background:#f3f4f6; border:1px solid #e5e7eb; border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer; }
-.btn-confirm-exit{ background:#10b981; color:#fff; border:none; border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer; }
-
-/* TestViewer.css */
-.tv__wrap {
-  width: 100%;
-  max-width: 980px;
-  margin: 0 auto;
-  padding: 24px 16px 48px;
-}
-
-.tv__header {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 0 18px;
-}
-
-.tv__title {
-  font-weight: 800;
-  letter-spacing: 0.5px;
-  font-size: 20px;
-  color: #111827;
-}
-
-.tv__card {
-  background: #ffffff;
-  border: 1px solid #f3f4f6;
-  border-radius: 16px;
+.modal-content {
+  width: min(420px, 92vw);
+  background: #fff;
+  border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 2px 10px rgba(17, 24, 39, 0.06);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.25);
+  text-align: center;
 }
-
-.tv__sectionTitle {
-  font-size: 18px;
-  font-weight: 700;
+.modal-content h3 {
   margin-bottom: 12px;
 }
-
-.tv__muted {
-  color: #6b7280;
-  font-size: 14px;
+.modal-content input {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 14px;
 }
-
-.tv__actions {
-  margin-top: 16px;
-  display: flex;
-  gap: 10px;
+.btn-cancel-exit {
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
 }
-
-.tv__btn {
+.btn-confirm-exit {
+  background: #10b981;
+  color: #fff;
   border: none;
   border-radius: 10px;
   padding: 10px 14px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
 }
 
-.tv__btnPrimary {
-  background: #2563eb;
-  color: #fff;
+
+/* Botón de salir (cruz roja en topbar) */
+.btn-exit {
+  justify-self: end;
+  background: transparent;
+  border: none;
+  font-size: 22px;
+  font-weight: bold;
+  color: #ef4444;
+  cursor: pointer;
+  transition: transform 0.15s ease, color 0.15s ease;
 }
 
-.tv__center {
-  text-align: center;
+.btn-exit:hover {
+  color: #dc2626;       /* rojo más fuerte */
+  transform: scale(1.15);
 }
 
-.tv__check {
-  font-size: 44px;
-  line-height: 1;
-  margin-bottom: 8px;
-  color: #22c55e;
+.btn-exit:active {
+  transform: scale(0.95);
 }
+

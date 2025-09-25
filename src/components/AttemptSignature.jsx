@@ -1,41 +1,29 @@
-// AttemptSignature.jsx
-// Componente de firma: dibuja en canvas y guarda en `firmas_intento`.
-// Props:
-//   supabase: cliente de supabase
-//   attemptId: uuid del intento
-//   signer: "paciente" | "operador" (default "paciente")
-//   onDone: callback tras guardar OK (o duplicado)
-//   uploadToStorage: bool (default false) — si true, sube PNG a Storage
-//   storageBucket: string (default "firmas")
-//   disabled: bool — para bloquear el botón externamente (opcional)
-
 import { useEffect, useRef, useState } from "react";
+import "../styles/AttemptSignature.css";
 
 export default function AttemptSignature({
   supabase,
   attemptId,
-  signer = "paciente",
+  signer = "paciente",        // 'paciente' | 'operador'
   onDone,
   uploadToStorage = false,
   storageBucket = "firmas",
   disabled = false,
+  minStrokePx = 40,           // longitud mínima de trazo para aceptar firma
 }) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
-  const drawing = useRef(false);
+  const drawingRef = useRef(false);
+  const lastPointRef = useRef({ x: 0, y: 0 });
   const [hasStroke, setHasStroke] = useState(false);
+  const [strokeLen, setStrokeLen] = useState(0);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
-  // clave para limpiar cache local si usas localStorage
-  const storageKey = `attempt:${attemptId}:answers`;
-
-  // ----- Canvas sizing (DPR) -----
+  // ---------- Canvas & DPR ----------
   const paintGuides = (ctx, cssW, cssH) => {
-    // fondo blanco
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, cssW, cssH);
-    // borde guía
     ctx.strokeStyle = "#e5e7eb";
     ctx.lineWidth = 1;
     ctx.strokeRect(10, 10, cssW - 20, cssH - 20);
@@ -46,44 +34,40 @@ export default function AttemptSignature({
     const canvas = canvasRef.current;
     if (!wrap || !canvas) return;
 
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
     const rect = wrap.getBoundingClientRect();
 
-    // tamaño CSS fijo (para no “encoger” visualmente)
-    const cssW = Math.max(320, rect.width);
-    const cssH = 220;
+    const cssW = Math.max(360, rect.width);
+    const cssH = Math.max(200, Math.min(260, rect.height - 40) || 220);
 
-    // aplicamos tamaño lógico con DPR
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     canvas.style.width = `${cssW}px`;
     canvas.style.height = `${cssH}px`;
 
     const ctx = canvas.getContext("2d");
-    // reset total y luego escalar una sola vez
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
 
     paintGuides(ctx, cssW, cssH);
     setHasStroke(false);
+    setStrokeLen(0);
   };
 
   useEffect(() => {
     resizeCanvas();
     const ro = new ResizeObserver(resizeCanvas);
     if (wrapRef.current) ro.observe(wrapRef.current);
-    const onWin = () => resizeCanvas();
-    window.addEventListener("orientationchange", onWin);
-    window.addEventListener("resize", onWin);
+    window.addEventListener("resize", resizeCanvas);
+    window.addEventListener("orientationchange", resizeCanvas);
     return () => {
       ro.disconnect();
-      window.removeEventListener("orientationchange", onWin);
-      window.removeEventListener("resize", onWin);
+      window.removeEventListener("resize", resizeCanvas);
+      window.removeEventListener("orientationchange", resizeCanvas);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ----- Dibujo -----
+  // ---------- Dibujo ----------
   const getXY = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
@@ -98,54 +82,59 @@ export default function AttemptSignature({
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     ctx.strokeStyle = "#111827";
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2.75;
     ctx.beginPath();
     ctx.moveTo(x, y);
+    lastPointRef.current = { x, y };
   };
 
   const drawTo = (x, y) => {
     const ctx = canvasRef.current.getContext("2d");
     ctx.lineTo(x, y);
     ctx.stroke();
+    const dx = x - lastPointRef.current.x;
+    const dy = y - lastPointRef.current.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 0) setStrokeLen((s) => s + dist);
+    lastPointRef.current = { x, y };
   };
 
   const onPointerDown = (e) => {
+    if (disabled) return;
     e.preventDefault();
     setErr("");
-    drawing.current = true;
+    drawingRef.current = true;
     const { x, y } = getXY(e);
     begin(x, y);
   };
   const onPointerMove = (e) => {
-    if (!drawing.current) return;
+    if (!drawingRef.current || disabled) return;
     e.preventDefault();
     const { x, y } = getXY(e);
     drawTo(x, y);
     if (!hasStroke) setHasStroke(true);
   };
   const stopDrawing = (e) => {
-    if (!drawing.current) return;
+    if (!drawingRef.current) return;
     e.preventDefault();
-    drawing.current = false;
+    drawingRef.current = false;
   };
 
   const clearCanvas = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
-
-    // restaurar estado y repintar (sin re-apilar scale)
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-    // respetar el DPR y el tamaño CSS actual
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
     const cssW = parseFloat(canvas.style.width);
     const cssH = parseFloat(canvas.style.height);
-    const dpr = window.devicePixelRatio || 1;
+
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     ctx.scale(dpr, dpr);
-
     paintGuides(ctx, cssW, cssH);
+
     setHasStroke(false);
+    setStrokeLen(0);
+    setErr("");
   };
 
   const canvasToBlob = () =>
@@ -153,14 +142,23 @@ export default function AttemptSignature({
       canvasRef.current.toBlob((b) => resolve(b), "image/png", 0.92);
     });
 
-  // ----- Guardado -----
+  // ---------- Guardado / firma ----------
   const registrarFirma = async () => {
     if (saving || disabled) return;
     setErr("");
-    setSaving(true);
 
+    if (!attemptId) {
+      setErr("Intento no válido.");
+      return;
+    }
+    if (!hasStroke || strokeLen < minStrokePx) {
+      setErr("Dibuja tu firma en el lienzo antes de continuar.");
+      return;
+    }
+
+    setSaving(true);
     try {
-      // 1) caso -> paciente
+      // 1) obtener paciente_id a partir del intento
       const { data: ip, error: e1 } = await supabase
         .from("intentos_prueba")
         .select("caso_id")
@@ -175,70 +173,62 @@ export default function AttemptSignature({
         .single();
       if (e2) throw e2;
 
-      // 2) (opcional) subir firma al Storage
+      // 2) subir evidencia (opcional)
       let firmaPath = null;
       let mime = "image/png";
       if (uploadToStorage) {
-        if (!hasStroke) {
-          throw new Error("Dibuja tu firma en el lienzo antes de continuar.");
-        }
         const blob = await canvasToBlob();
         mime = blob?.type || "image/png";
-        const fileName = `${attemptId}-${Date.now()}.png`;
-        const filePath = `attempts/${attemptId}/${fileName}`;
-        const { error: upErr } = await supabase.storage
-          .from(storageBucket)
-          .upload(filePath, blob, { contentType: mime, upsert: false });
+        // nombre único
+        const ts = new Date().toISOString().replace(/[:.]/g, "");
+        const base = `attempts/${attemptId}/firma-${signer}-${ts}`;
+        const tryNames = [`${base}.png`, `${base}-1.png`, `${base}-2.png`];
+
+        let upErr = null;
+        for (const filePath of tryNames) {
+          const { error } = await supabase.storage
+            .from(storageBucket)
+            .upload(filePath, blob, { contentType: mime, upsert: false });
+          if (!error) { firmaPath = filePath; upErr = null; break; }
+          upErr = error;
+          if (error?.status !== 409) break; // si no es "ya existe", no reintentar
+        }
         if (upErr) throw upErr;
-        firmaPath = filePath;
       }
 
-      // 3) insertar en firmas_intento
+      // 3) insertar en firmas_intento (idempotente por índice único)
       const payload = {
         intento_id: attemptId,
         paciente_id: caso.paciente_id,
-        firmado_por: signer, // 'paciente' o 'operador'
+        firmado_por: signer,
         firma_mime: mime,
-        ...(firmaPath ? { firma_path: firmaPath } : {}),
+        ...(firmaPath ? { firma_path: firmaPath, firma_bucket: storageBucket } : {}),
       };
 
-      // Insert "normal": si hay duplicado (23505) lo tratamos como OK
-      const { error: insErr } = await supabase
-        .from("firmas_intento")
-        .insert(payload);
+      const { error: insErr } = await supabase.from("firmas_intento").insert(payload);
 
       if (insErr) {
-        // 23505 => conflicto único (ya está firmado)
+        // duplicado por índice único
         if (insErr.code === "23505") {
-          // lo consideramos éxito idempotente
           onDone?.();
           return;
         }
-        // 42501 => RLS/permiso
+        // RLS/Storage tips
         if (insErr.code === "42501") {
-          throw new Error(
-            "No tienes permiso para firmar este intento (política RLS)."
-          );
+          throw new Error("No tienes permiso para firmar este intento (verifica políticas RLS).");
         }
-        // 42P01 u otros => mensaje original
         throw insErr;
       }
 
-      // 4) limpiar cache local de respuestas (si la usas)
-      try {
-        localStorage.removeItem(storageKey);
-      } catch {}
-
-      // 5) listo
       onDone?.();
     } catch (e) {
       console.error(e);
-      const msg =
-        e?.message ||
-        e?.hint ||
-        "No se pudo registrar la firma. Revisa tu conexión o permisos.";
-      setErr(msg);
-      // opcional: alert(msg);
+      const hint = (e?.hint || e?.message || "").toLowerCase();
+      if (hint.includes("bucket") || hint.includes("storage")) {
+        setErr("No se pudo guardar la imagen en Storage. Revisa el bucket y permisos.");
+      } else {
+        setErr(e?.message || "No se pudo registrar la firma.");
+      }
     } finally {
       setSaving(false);
     }
@@ -246,7 +236,10 @@ export default function AttemptSignature({
 
   return (
     <div className="sig__wrap">
-      <h3 className="sig__title">Firmar</h3>
+      <div className="sig__header">
+        <h3 className="sig__title">Firmar</h3>
+        <div className="sig__hint">Traza tu firma dentro del recuadro</div>
+      </div>
 
       <div
         ref={wrapRef}
@@ -258,42 +251,33 @@ export default function AttemptSignature({
         onTouchStart={onPointerDown}
         onTouchMove={onPointerMove}
         onTouchEnd={stopDrawing}
+        aria-label="Área para firmar"
+        role="img"
       >
         <canvas ref={canvasRef} className="sig__canvas" />
       </div>
 
-      <div className="sig__buttons" style={{ display: "flex", gap: 8 }}>
-        <button type="button" onClick={clearCanvas} disabled={saving}>
+      <div className="sig__buttons">
+        <button type="button" className="sig__btn" onClick={clearCanvas} disabled={saving}>
           Limpiar
         </button>
         <button
           type="button"
+          className="sig__btn sig__btn--primary"
           onClick={registrarFirma}
-          disabled={saving || disabled}
-          style={{ background: "#16a34a", color: "white", padding: "6px 12px" }}
+          disabled={saving || disabled || !hasStroke || strokeLen < minStrokePx}
+          title={!hasStroke ? "Dibuja tu firma" : undefined}
         >
           {saving ? "Guardando..." : "Finalizar y firmar"}
         </button>
       </div>
 
-      {err && (
-        <div
-          style={{
-            color: "#b91c1c",
-            marginTop: 8,
-            fontSize: 14,
-            lineHeight: 1.3,
-          }}
-        >
-          {err}
-        </div>
-      )}
+      {err && <div className="sig__error">{err}</div>}
 
-      <p style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>
-        Al firmar, se validará que el intento esté completo, se calcularán los
-        puntajes y se cerrará la prueba. Si falta algo, verás un mensaje.
+      <p className="sig__note">
+        Al firmar, se validará que el intento esté completo y se cerrará la prueba. Si falta algo o hay un problema de permisos,
+        verás un mensaje.
       </p>
-
     </div>
   );
 }

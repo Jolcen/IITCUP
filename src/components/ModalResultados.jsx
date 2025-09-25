@@ -1,4 +1,3 @@
-// src/components/ModalResultados.jsx
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import "../styles/ModalResultados.css";
@@ -11,7 +10,7 @@ const PRUEBA_IMG = {
   DEFAULT: "static/images/testP.jpg",
 };
 
-// Clases EXACTAS que enviaste
+// Clases EXACTAS que enviaste (para el perfil simulado)
 const CLASES = [
   "No_clinico",
   "Ansiedad",
@@ -45,7 +44,7 @@ export default function ModalResultados({ open, onClose, caso }) {
       setLoading(true);
       setTests([]);
       try {
-        // Solo PRUEBAS FINALIZADAS del caso (RPC existente)
+        // Solo PRUEBAS FINALIZADAS del caso (último intento por prueba)
         const { data: fin, error: eFin } = await supabase.rpc(
           "api_pruebas_finalizadas_por_caso",
           { p_caso: caso.id }
@@ -53,9 +52,9 @@ export default function ModalResultados({ open, onClose, caso }) {
         if (eFin) throw eFin;
 
         const list = (fin || []).map((p) => ({
-          id: p?.codigo || p?.prueba_id,
+          id: p?.prueba_id || p?.id,
           codigo: p?.codigo,
-          nombre: p?.codigo,
+          nombre: p?.nombre || p?.codigo,
           img: PRUEBA_IMG[p?.codigo] || PRUEBA_IMG.DEFAULT,
           done: true,
           intentoId: p?.intento_id || null,
@@ -71,7 +70,7 @@ export default function ModalResultados({ open, onClose, caso }) {
     })();
   }, [open, caso?.id]);
 
-  // Abrir detalle de una prueba finalizada y cargar sus puntajes
+  // Abrir detalle de una prueba finalizada y cargar sus puntajes (calcula+lee)
   async function abrirDetalle(t) {
     if (!t?.done || !t?.intentoId) return;
     setDetalleTest(t);
@@ -79,13 +78,17 @@ export default function ModalResultados({ open, onClose, caso }) {
     setPuntajes([]);
     setPuntajesLoading(true);
     try {
-      const { data, error } = await supabase.rpc("api_puntajes_por_intento", {
-        p_intento: t.intentoId,
-      });
+      const { data, error } = await supabase.rpc(
+        "api_get_or_calc_puntajes_por_intento",
+        { p_intento_id: t.intentoId, p_solo_validos: true }
+      );
       if (error) throw error;
+
       const norm = (data || []).map((r) => ({
-        escala: r?.escala_codigo || r?.escala_id,
-        puntaje: r?.puntaje_convertido ?? null,
+        escala: r.escala_codigo,                       // código legible de la escala
+        puntaje: r.puntaje_convertido ?? null,         // valor convertido (T/estandarizado)
+        bruto: r.puntaje_bruto ?? null,
+        normativa: r.normativa_version ?? null,
       }));
       setPuntajes(norm);
     } catch (e) {
@@ -94,6 +97,7 @@ export default function ModalResultados({ open, onClose, caso }) {
       setPuntajesLoading(false);
     }
   }
+
   function cerrarDetalle() {
     setShowDetalle(false);
     setDetalleTest(null);
@@ -132,31 +136,39 @@ export default function ModalResultados({ open, onClose, caso }) {
         {loading && <div className="muted" style={{ padding: 12 }}>Cargando…</div>}
 
         {!loading && (
-          <div className="mr-grid">
-            {tests.map((t) => (
-              <div
-                key={t.id}
-                className="mr-card done"
-                onClick={() => abrirDetalle(t)}
-                title="Ver resultados de esta prueba"
-                role="button"
-              >
-                <span className="mr-badge mr-badge--done">✔ Completada</span>
-                <div className="mr-card__imgwrap">
-                  <img src={t.img} alt={t.codigo} className="mr-card__img" />
-                </div>
-                <div className="mr-card__title">{t.nombre}</div>
-                {t.terminado_en && (
-                  <div className="mr-card__meta">
-                    <small>{new Date(t.terminado_en).toLocaleString()}</small>
-                  </div>
-                )}
+          <>
+            {tests.length === 0 ? (
+              <div className="muted" style={{ padding: 12 }}>
+                No hay pruebas finalizadas para este caso.
               </div>
-            ))}
-          </div>
+            ) : (
+              <div className="mr-grid">
+                {tests.map((t) => (
+                  <div
+                    key={t.id}
+                    className="mr-card done"
+                    onClick={() => abrirDetalle(t)}
+                    title="Ver resultados de esta prueba"
+                    role="button"
+                  >
+                    <span className="mr-badge mr-badge--done">✔ Completada</span>
+                    <div className="mr-card__imgwrap">
+                      <img src={t.img} alt={t.codigo} className="mr-card__img" />
+                    </div>
+                    <div className="mr-card__title">{t.nombre}</div>
+                    {t.terminado_en && (
+                      <div className="mr-card__meta">
+                        <small>{new Date(t.terminado_en).toLocaleString()}</small>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
-        {/* Solo 1 botón: Generar perfil (como pediste) */}
+        {/* Botón para perfil simulado (como pediste) */}
         <div className="mr-actions" style={{ gap: 8 }}>
           <button
             className="btn-primary mr-btn"
@@ -192,13 +204,20 @@ export default function ModalResultados({ open, onClose, caso }) {
                 {!puntajesLoading && puntajes.length > 0 && (
                   <table className="table-mini" style={{ width: "100%" }}>
                     <thead>
-                      <tr><th>Escala</th><th>Valor</th></tr>
+                      <tr>
+                        <th>Escala</th>
+                        <th>T</th>
+                        <th>Bruto</th>
+                        <th>Normativa</th>
+                      </tr>
                     </thead>
                     <tbody>
-                      {puntajes.slice(0, 100).map((r, i) => (
+                      {puntajes.slice(0, 200).map((r, i) => (
                         <tr key={i}>
                           <td>{r.escala}</td>
                           <td>{r.puntaje ?? "—"}</td>
+                          <td>{r.bruto ?? "—"}</td>
+                          <td>{r.normativa ?? "—"}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -236,7 +255,7 @@ function PerfilSimpleModal({ caso, perfil, onClose }) {
     >
       <div className="modal result-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h3>Perfil simulado</h3>
+          <h3>Perfil determinado</h3>
           <button className="close" onClick={onClose}>✕</button>
         </div>
 

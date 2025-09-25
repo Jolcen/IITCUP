@@ -133,7 +133,7 @@ export default function Sidebar() {
 
             <NavLink to="/evaluaciones">
               <li>
-                <FaClipboardList /> Evaluaciones
+                <FaClipboardList /> Casos
               </li>
             </NavLink>
 

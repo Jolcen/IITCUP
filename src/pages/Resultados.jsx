@@ -16,7 +16,8 @@ export default function Resultados() {
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
   const pages = useMemo(() => {
-    const max = 5, start = Math.max(1, page - Math.floor(max / 2));
+    const max = 5;
+    const start = Math.max(1, page - Math.floor(max / 2));
     const end = Math.min(totalPages, start + max - 1);
     return Array.from({ length: end - start + 1 }, (_, i) => start + i);
   }, [page, totalPages]);
@@ -50,12 +51,15 @@ export default function Resultados() {
       } catch (err) {
         console.error(err);
         if (!alive) return;
-        setRows([]); setTotal(0);
+        setRows([]);
+        setTotal(0);
       } finally {
         if (alive) setLoading(false);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [page, q]);
 
   function openModalPruebas(casoRow) {
@@ -73,7 +77,10 @@ export default function Resultados() {
           <input
             placeholder="Buscar por paciente, CI o motivo…"
             value={q}
-            onChange={(e) => { setPage(1); setQ(e.target.value); }}
+            onChange={(e) => {
+              setPage(1);
+              setQ(e.target.value);
+            }}
           />
         </div>
       </div>
@@ -91,36 +98,63 @@ export default function Resultados() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={5} className="muted">Cargando…</td></tr>
-            )}
-            {!loading && rows.length === 0 && (
-              <tr><td colSpan={5} className="muted">Sin casos con pruebas finalizadas</td></tr>
-            )}
-            {!loading && rows.map(r => (
-              <tr key={r.id}>
-                <td>{r.paciente_nombre}</td>
-                <td>{r.paciente_ci || "—"}</td>
-                <td title={r.motivacion || ""}>{r.motivacion || "—"}</td>
-                <td>{r.creado_en ? new Date(r.creado_en).toLocaleDateString() : "—"}</td>
-                <td>
-                  <button className="btn-link" title="Ver pruebas finalizadas" onClick={() => openModalPruebas(r)}>
-                    📋 Ver pruebas
-                  </button>
+              <tr>
+                <td colSpan={5} className="muted">
+                  Cargando…
                 </td>
               </tr>
-            ))}
+            )}
+            {!loading && rows.length === 0 && (
+              <tr>
+                <td colSpan={5} className="muted">
+                  Sin casos con pruebas finalizadas
+                </td>
+              </tr>
+            )}
+            {!loading &&
+              rows.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.paciente_nombre}</td>
+                  <td>{r.paciente_ci || "—"}</td>
+                  <td title={r.motivacion || ""}>{r.motivacion || "—"}</td>
+                  <td>{r.creado_en ? new Date(r.creado_en).toLocaleDateString() : "—"}</td>
+                  <td>
+                    <button
+                      className="btn-link"
+                      title="Ver pruebas finalizadas"
+                      onClick={() => openModalPruebas(r)}
+                    >
+                      📋 Ver pruebas
+                    </button>
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
 
         {/* paginación */}
         <div className="pagination" style={{ marginTop: 10 }}>
-          <button className="pg" onClick={() => setPage(1)} disabled={page === 1}>«</button>
-          <button className="pg" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>‹</button>
-          {pages.map(n => (
-            <button key={n} className={`pg ${n === page ? "active" : ""}`} onClick={() => setPage(n)}>{n}</button>
+          <button className="pg" onClick={() => setPage(1)} disabled={page === 1}>
+            «
+          </button>
+          <button className="pg" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
+            ‹
+          </button>
+          {pages.map((n) => (
+            <button key={n} className={`pg ${n === page ? "active" : ""}`} onClick={() => setPage(n)}>
+              {n}
+            </button>
           ))}
-          <button className="pg" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>›</button>
-          <button className="pg" onClick={() => setPage(totalPages)} disabled={page === totalPages}>»</button>
+          <button
+            className="pg"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+          >
+            ›
+          </button>
+          <button className="pg" onClick={() => setPage(totalPages)} disabled={page === totalPages}>
+            »
+          </button>
         </div>
       </div>
 
@@ -131,7 +165,13 @@ export default function Resultados() {
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
               <h3 style={{ margin: 0 }}>Pruebas finalizadas</h3>
               <div style={{ marginLeft: "auto" }}>
-                <button className="btn-cancel-exit" onClick={() => { setOpenPruebas(false); setCaseForPruebas(null); }}>
+                <button
+                  className="btn-cancel-exit"
+                  onClick={() => {
+                    setOpenPruebas(false);
+                    setCaseForPruebas(null);
+                  }}
+                >
                   Cerrar
                 </button>
               </div>
@@ -143,7 +183,10 @@ export default function Resultados() {
 
             <ModalResultados
               open={true}
-              onClose={() => { setOpenPruebas(false); setCaseForPruebas(null); }}
+              onClose={() => {
+                setOpenPruebas(false);
+                setCaseForPruebas(null);
+              }}
               caso={caseForPruebas}
             />
           </div>

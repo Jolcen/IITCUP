@@ -1,3 +1,4 @@
+// TestViewer.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
@@ -7,59 +8,46 @@ import "../styles/TestViewer.css";
 const SLUG2CODE = { pai: "PAI", "mcmi-iv": "MCMI-IV", "mmpi-2": "MMPI-2", custom: "CUSTOM" };
 
 export default function TestViewer() {
-  const { testId } = useParams();
+  const { testId } = useParams(); // viene como slug (pai, mmpi-2, etc.)
   const [sp] = useSearchParams();
   const caseId = sp.get("case") || null;
   const pacienteNombre = sp.get("nombre") || "";
   const navigate = useNavigate();
 
-  // ============ Estado principal ============
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Intento actual / prueba
   const [attemptId, setAttemptId] = useState(null);
   const [pruebaId, setPruebaId] = useState(null);
-  const [attemptState, setAttemptState] = useState(null); // pendiente | en_evaluacion | interrumpido | evaluado
-  const [attemptEnded, setAttemptEnded] = useState(false); // terminado_en != null
+  const [attemptState, setAttemptState] = useState(null);
+  const [attemptEnded, setAttemptEnded] = useState(false);
 
-  // Fases
   const [preStart, setPreStart] = useState(true);
   const [showSignModal, setShowSignModal] = useState(false);
   const [showFinishScreen, setShowFinishScreen] = useState(false);
 
-  // Tiempo
   const [time, setTime] = useState(0);
   const tickingRef = useRef(null);
   const startedAtRef = useRef(null);
 
-  // Locks
   const savingRef = useRef(false);
   const finishedRef = useRef(false);
 
-  // Modal contraseña operador (re-autenticación real)
   const [askPassOpen, setAskPassOpen] = useState(false);
   const operatorPassInputRef = useRef(null);
   const operatorPassName = useMemo(() => "op_" + Math.random().toString(36).slice(2), []);
   const deferredActionRef = useRef(null);
   const [passSubmitting, setPassSubmitting] = useState(false);
 
-  // Firma
   const [consentChecked, setConsentChecked] = useState(false);
 
-  const storageKey = useMemo(
-    () => (attemptId ? `attempt:${attemptId}:answers` : null),
-    [attemptId]
-  );
+  const storageKey = useMemo(() => (attemptId ? `attempt:${attemptId}:answers` : null), [attemptId]);
 
-  const code = useMemo(
-    () => SLUG2CODE[testId] ?? (testId || "").toUpperCase(),
-    [testId]
-  );
+  const code = useMemo(() => SLUG2CODE[testId] ?? (testId || "").toUpperCase(), [testId]);
 
-  // ====== TTS (opcional) ======
+  // ====== TTS opcional ======
   const [ttsVoice, setTtsVoice] = useState(null);
   function pickBestSpanishVoice(voices) {
     const byName = (rex) => voices.find((v) => (v.lang || "").toLowerCase().startsWith("es") && rex.test(v.name || ""));
@@ -72,9 +60,7 @@ export default function TestViewer() {
     }
     loadVoices();
     window.speechSynthesis.addEventListener?.("voiceschanged", loadVoices);
-    return () => {
-      window.speechSynthesis.removeEventListener?.("voiceschanged", loadVoices);
-    };
+    return () => window.speechSynthesis.removeEventListener?.("voiceschanged", loadVoices);
   }, []);
   function sanitizeForSpeech(raw) {
     if (!raw) return "";
@@ -86,14 +72,11 @@ export default function TestViewer() {
     return t;
   }
   function chunkText(t, maxLen = 180) {
-    const words = t.split(/\s+/);
-    const chunks = [];
+    const words = t.split(/\s+/), chunks = [];
     let buf = [], len = 0;
     for (const w of words) {
-      if (len + w.length + 1 > maxLen) {
-        if (buf.length) chunks.push(buf.join(" "));
-        buf = [w]; len = w.length;
-      } else { buf.push(w); len += w.length + 1; }
+      if (len + w.length + 1 > maxLen) { if (buf.length) chunks.push(buf.join(" ")); buf = [w]; len = w.length; }
+      else { buf.push(w); len += w.length + 1; }
     }
     if (buf.length) chunks.push(buf.join(" "));
     return chunks;
@@ -114,7 +97,6 @@ export default function TestViewer() {
       });
     } catch {}
   }
-  // ====== fin TTS ======
 
   useEffect(() => {
     document.body.classList.add("focus-test");
@@ -124,7 +106,6 @@ export default function TestViewer() {
     };
   }, []);
 
-  // -------- Helpers --------
   function normalizeOptions(v) {
     if (Array.isArray(v)) return v;
     if (typeof v === "string") {
@@ -137,17 +118,11 @@ export default function TestViewer() {
   }
 
   function getRawFromOption(q, opcionElegida) {
-    const opcion_txt =
-      typeof opcionElegida === "string"
-        ? opcionElegida
-        : opcionElegida?.label ?? String(opcionElegida);
-
+    const opcion_txt = typeof opcionElegida === "string" ? opcionElegida : (opcionElegida?.label ?? String(opcionElegida));
     if (!q?.opciones || q?.tipo !== "likert") return null;
 
     if (Array.isArray(q.opciones)) {
-      const idx = q.opciones.findIndex(
-        (o) => (typeof o === "string" ? o : o?.label ?? o?.txt ?? "") === opcion_txt
-      );
+      const idx = q.opciones.findIndex((o) => (typeof o === "string" ? o : o?.label ?? o?.txt ?? "") === opcion_txt);
       if (idx >= 0) {
         const o = q.opciones[idx];
         const cand = typeof o === "object" ? o.raw ?? o.value ?? o.score ?? o.puntaje : undefined;
@@ -172,33 +147,33 @@ export default function TestViewer() {
     return null;
   }
 
-  // === Buscar o crear intento abierto (terminado_en IS NULL) ===
+  // ===== ensureAttempt: reutiliza si existe cualquiera; crea si no hay ninguno
   async function ensureAttempt(pid) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Sin sesión.");
     if (!caseId) throw new Error("Falta caseId.");
 
-    // Uno abierto
-    const { data: abiertos, error: e1 } = await supabase
+    // 1) ¿Existe algún intento para este caso+prueba?
+    const { data: anyTry, error: e0 } = await supabase
       .from("intentos_prueba")
       .select("id, estado, terminado_en")
       .eq("caso_id", caseId)
       .eq("prueba_id", pid)
-      .is("terminado_en", null)
+      .order("iniciado_en", { ascending: false })
       .limit(1);
-    if (e1) throw e1;
+    if (e0) throw e0;
 
-    if (abiertos && abiertos.length) {
-      const it = abiertos[0];
+    if (anyTry && anyTry.length) {
+      const it = anyTry[0];
       setAttemptState(it.estado || null);
       setAttemptEnded(!!it.terminado_en);
       return it.id;
     }
 
-    // crear
+    // 2) No existe: crear
     const { data: creado, error: e2 } = await supabase
       .from("intentos_prueba")
-      .insert({ caso_id: caseId, prueba_id: pid }) // default estado = 'pendiente'
+      .insert({ caso_id: caseId, prueba_id: pid })
       .select("id, estado, terminado_en")
       .single();
     if (e2) throw e2;
@@ -208,7 +183,7 @@ export default function TestViewer() {
     return creado.id;
   }
 
-  // ------ Cargar prueba + items + validación de asignación ------
+  // ---------- Cargar prueba e intento ----------
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -216,19 +191,35 @@ export default function TestViewer() {
         setLoading(true);
         setErr("");
 
-        // 1) id prueba por código
-        const { data: pruebas, error: eP } = await supabase
-          .from("pruebas")
-          .select("id, codigo")
-          .ilike("codigo", SLUG2CODE[testId] ?? (testId || "").toUpperCase())
-          .limit(1);
-        if (eP) throw eP;
-        if (!pruebas?.length) throw new Error("No se encontró la prueba en la base de datos.");
-        const pid = pruebas[0].id;
+        // 1) Resolver la prueba: slug -> id; si no hay slug, intentar por codigo
+        let pid = null;
+        {
+          const bySlug = await supabase
+            .from("pruebas")
+            .select("id, slug, codigo")
+            .eq("slug", testId)
+            .limit(1)
+            .maybeSingle();
+
+          if (bySlug.error) throw bySlug.error;
+          if (bySlug.data) {
+            pid = bySlug.data.id;
+          } else {
+            const code = SLUG2CODE[testId] ?? (testId || "").toUpperCase();
+            const byCode = await supabase
+              .from("pruebas")
+              .select("id, codigo")
+              .ilike("codigo", code)
+              .limit(1);
+            if (byCode.error) throw byCode.error;
+            if (!byCode.data?.length) throw new Error("No se encontró la prueba en la base de datos.");
+            pid = byCode.data[0].id;
+          }
+        }
         if (!alive) return;
         setPruebaId(pid);
 
-        // 2) Validar que la prueba esté asignada al caso
+        // 2) Verificar que la prueba esté asignada al caso
         if (caseId) {
           const { data: asignada, error: eAsign } = await supabase
             .from("casos_pruebas")
@@ -242,7 +233,7 @@ export default function TestViewer() {
             return;
           }
 
-          // 2b) Bloquear si ya evaluada/terminada
+          // 3) Si ya hay intento evaluado/terminado, bloquear
           const { data: comp, error: eComp } = await supabase
             .from("intentos_prueba")
             .select("id, estado, terminado_en")
@@ -257,7 +248,7 @@ export default function TestViewer() {
           }
         }
 
-        // 3) Cargar items
+        // 4) Cargar ítems
         const { data, error } = await supabase
           .from("items_prueba")
           .select("id, enunciado, opciones, inverso, orden, activo, tipo")
@@ -279,12 +270,12 @@ export default function TestViewer() {
         if (!alive) return;
         setItems(mapped);
 
-        // 4) Asegurar intento abierto
+        // 5) Crear / reutilizar intento
         const atid = await ensureAttempt(pid);
         if (!alive) return;
         setAttemptId(atid);
 
-        // 5) Progreso
+        // 6) Continuar donde se dejó
         const { data: resp } = await supabase
           .from("respuestas")
           .select("item_id")
@@ -299,22 +290,19 @@ export default function TestViewer() {
         if (alive) setLoading(false);
       }
     })();
-
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testId, caseId]);
 
-  // ------ Iniciar prueba -> RPC: casos_pruebas.en_progreso ------
+  // ---------- Iniciar prueba ----------
   async function startTest() {
     if (!attemptId || !pruebaId || !caseId) {
       alert("Preparando la prueba…");
       return;
     }
 
-    // 1) cambiar intento a en_evaluacion (tu RPC opcional)
     const { error: rpcErr } = await supabase.rpc("start_intento", { p_id: attemptId });
     if (rpcErr) {
-      // fallback: update directo si no tienes ese RPC
       const { error: updErr } = await supabase
         .from("intentos_prueba")
         .update({ estado: "en_evaluacion" })
@@ -325,17 +313,12 @@ export default function TestViewer() {
       }
     }
 
-    // 2) marcar la PRUEBA del caso como en_progreso (impacta estado del caso vía trigger)
     const { error: eCase } = await supabase.rpc("marcar_prueba_en_progreso", {
       p_caso_id: caseId,
       p_prueba_id: pruebaId,
     });
-    if (eCase) {
-      // No bloquee el inicio por esto; deja traza y sigue
-      console.warn("No se pudo marcar en_progreso la prueba del caso:", eCase);
-    }
+    if (eCase) console.warn("No se pudo marcar en_evaluacion:", eCase);
 
-    // arrancar timer UI
     startedAtRef.current = Date.now();
     if (tickingRef.current) clearInterval(tickingRef.current);
     setTime(0);
@@ -345,28 +328,21 @@ export default function TestViewer() {
     setPreStart(false);
   }
 
-  // ------ Guardar respuesta ------
+  // ---------- Guardar respuesta ----------
   async function handleAnswer(opcionElegida) {
     if (savingRef.current || !attemptId) return;
-
     if (attemptEnded || attemptState === "evaluado") {
       alert("Este intento ya no es editable.");
       return;
     }
-
     const idxSnapshot = currentIndex;
     const q = items[idxSnapshot];
     if (!q) return;
 
     savingRef.current = true;
     try {
-      const opcion_txt =
-        typeof opcionElegida === "string"
-          ? opcionElegida
-          : opcionElegida?.label ?? String(opcionElegida);
-
+      const opcion_txt = typeof opcionElegida === "string" ? opcionElegida : (opcionElegida?.label ?? String(opcionElegida));
       const raw = q?.tipo === "likert" ? getRawFromOption(q, opcionElegida) : null;
-
       const payload = {
         caso_id: caseId,
         prueba_id: pruebaId,
@@ -375,41 +351,33 @@ export default function TestViewer() {
         invertido: q.inverso ?? false,
         valor: { opcion_txt, raw },
       };
-
       const { error } = await supabase
         .from("respuestas")
-        .upsert(payload, { onConflict: "intento_id,item_id", ignoreDuplicates: false });
-
+        .upsert(payload, { onConflict: "caso_id,prueba_id,item_id", ignoreDuplicates: false });
       if (error) console.error("Error guardando respuesta:", error);
     } catch (e) {
       console.error("Excepción guardando respuesta:", e);
     } finally {
-      setCurrentIndex((i) => {
-        const next = i + 1;
-        return next >= items.length ? next : next;
-      });
+      setCurrentIndex((i) => (i + 1));
       savingRef.current = false;
     }
   }
 
-  // ------ Firma ------
+  // ---------- Firma ----------
   function requestSignature() {
     setConsentChecked(false);
     setShowSignModal(true);
   }
 
-  // Al terminar firma → marcar PRUEBA como completada + UI
   const handleSignatureDone = async () => {
     try {
       if (pruebaId && caseId) {
         const { error } = await supabase.rpc("actualizar_estado_prueba_y_caso", {
           p_caso_id: caseId,
           p_prueba_id: pruebaId,
-          p_estado: "completada",
+          p_estado: "evaluado",
         });
-        if (error) {
-          console.warn("No se pudo marcar la prueba como completada:", error);
-        }
+        if (error) console.warn("No se pudo marcar la prueba como evaluado:", error);
       }
     } catch (e) {
       console.warn("RPC completar falló:", e);
@@ -421,7 +389,7 @@ export default function TestViewer() {
     setShowFinishScreen(true);
   };
 
-  // ====== Modal contraseña operador ======
+  // ----- contraseña operador / salida protegida -----
   function openAskPassModal(onSuccess) {
     deferredActionRef.current = onSuccess;
     setAskPassOpen(true);
@@ -442,10 +410,7 @@ export default function TestViewer() {
       try {
         const pass = operatorPassInputRef.current?.value || "";
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user?.email) {
-          alert("Sesión no válida.");
-          return;
-        }
+        if (!user?.email) { alert("Sesión no válida."); return; }
 
         const { error } = await supabase.auth.signInWithPassword({
           email: user.email,
@@ -474,22 +439,37 @@ export default function TestViewer() {
     })();
   }
 
+  // salida: marca interrumpido y vuelve
   function requestExitToEvaluaciones() {
-    openAskPassModal(() => {
-      try { window.speechSynthesis.cancel?.(); } catch {}
-      if (tickingRef.current) clearInterval(tickingRef.current);
-      navigate("/evaluaciones");
+    openAskPassModal(async () => {
+      try {
+        if (attemptId) {
+          await supabase.from("intentos_prueba").update({ estado: "interrumpido" }).eq("id", attemptId);
+        }
+        if (caseId && pruebaId) {
+          await supabase.rpc("actualizar_estado_prueba_y_caso", {
+            p_caso_id: caseId,
+            p_prueba_id: pruebaId,
+            p_estado: "interrumpido",
+          });
+        }
+      } catch (e) {
+        console.warn("No se pudo marcar interrumpido:", e);
+      } finally {
+        try { window.speechSynthesis.cancel?.(); } catch {}
+        if (tickingRef.current) clearInterval(tickingRef.current);
+        navigate("/evaluaciones");
+      }
     });
   }
   function backFromFinish() { openAskPassModal(() => navigate("/evaluaciones")); }
 
-  // ===== Render =====
+  // ---------- Render ----------
   if (loading) return <div className="loader">Cargando prueba...</div>;
   if (err) return <div className="loader" style={{ color: "crimson" }}>{err}</div>;
 
   const total = items.length;
 
-  // Si ya respondió todo y aún no firmó → pedir firma
   if (!preStart && !showFinishScreen && !showSignModal && currentIndex >= total && !finishedRef.current) {
     requestSignature();
     return null;
@@ -500,11 +480,10 @@ export default function TestViewer() {
       <div className="focus-wrap">
         <div className="focus-card">
           <h1 className="focus-title">Iniciar {code}</h1>
-          {pacienteNombre && (
-            <p className="focus-sub">Paciente: <strong>{pacienteNombre}</strong></p>
-          )}
+          {pacienteNombre && <p className="focus-sub">Paciente: <strong>{pacienteNombre}</strong></p>}
           <ul className="focus-bullets">
             <li>Se mostrará una pregunta a la vez.</li>
+            <li><strong>No podrás salir hasta finalizar.</strong></li>
             <li>Al finalizar, firmarás tu conformidad.</li>
           </ul>
           <div className="focus-actions">
@@ -525,9 +504,7 @@ export default function TestViewer() {
           <h1 className="finish-title">¡Prueba terminada!</h1>
           <p className="finish-sub">Se registró la firma. El operador revisará y finalizará.</p>
           <div className="finish-actions">
-            <button className="btn-back" onClick={backFromFinish}>
-              ← Volver a Evaluaciones
-            </button>
+            <button className="btn-back" onClick={backFromFinish}>← Volver a Evaluaciones</button>
           </div>
         </div>
 
@@ -542,8 +519,6 @@ export default function TestViewer() {
                   type="password"
                   name={operatorPassName}
                   autoComplete="new-password"
-                  inputMode="numeric"
-                  pattern="\d*"
                   placeholder="Contraseña de operador"
                   onPaste={(e) => e.preventDefault()}
                   onDrop={(e) => e.preventDefault()}
@@ -575,9 +550,7 @@ export default function TestViewer() {
       <div className="test-topbar">
         <div className="test-topbar-spacer" />
         <div className="test-topbar-title">{code}</div>
-        <button className="btn-exit" onClick={requestExitToEvaluaciones} title="Salir">
-          ✖
-        </button>
+        <button className="btn-exit" onClick={requestExitToEvaluaciones} title="Salir">✖</button>
       </div>
 
       <div className="test-container">
@@ -612,12 +585,7 @@ export default function TestViewer() {
         )}
       </div>
 
-      <button
-        className="fab-read"
-        onClick={() => speakPregunta(pregunta?.texto || "")}
-        aria-label="Escuchar pregunta"
-        title="Escuchar pregunta"
-      >
+      <button className="fab-read" onClick={() => speakPregunta(pregunta?.texto || "")} aria-label="Escuchar pregunta" title="Escuchar pregunta">
         🔊
       </button>
 
@@ -664,8 +632,6 @@ export default function TestViewer() {
                 type="password"
                 name={operatorPassName}
                 autoComplete="new-password"
-                inputMode="numeric"
-                pattern="\d*"
                 placeholder="Contraseña de operador"
                 onPaste={(e) => e.preventDefault()}
                 onDrop={(e) => e.preventDefault()}
@@ -674,9 +640,7 @@ export default function TestViewer() {
                 style={{ width: "100%", padding: 10, marginBottom: 12 }}
               />
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button type="button" className="btn-cancel-exit" onClick={closeAskPassModal}>
-                  Cancelar
-                </button>
+                <button type="button" className="btn-cancel-exit" onClick={closeAskPassModal}>Cancelar</button>
                 <button type="submit" className="btn-confirm-exit" disabled={passSubmitting}>
                   {passSubmitting ? "Verificando…" : "Confirmar"}
                 </button>

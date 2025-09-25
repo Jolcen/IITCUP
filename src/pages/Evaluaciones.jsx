@@ -1,3 +1,4 @@
+// src/pages/Evaluaciones.jsx
 import "../styles/Evaluaciones.css";
 import { FaUserCircle, FaEdit, FaTrash, FaPlay, FaSearch, FaEye, FaUserPlus } from "react-icons/fa";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
@@ -15,6 +16,7 @@ export default function Evaluaciones() {
   // --- Perfil actual (rol) ---
   const [userId, setUserId] = useState(null);
   const [role, setRole] = useState(null); // administrador | encargado | operador | asistente
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -23,10 +25,17 @@ export default function Evaluaciones() {
       if (!alive) return;
       setUserId(user?.id ?? null);
 
+      let r = null;
       if (user?.id) {
-        const { data } = await supabase.from("app_users").select("rol").eq("id", user.id).maybeSingle();
-        setRole(data?.rol ?? null);
+        const { data } = await supabase
+          .from("app_users")
+          .select("rol")
+          .eq("id", user.id)
+          .maybeSingle();
+        r = data?.rol ?? null;
       }
+      setRole(r);
+      setAuthReady(true);
     })();
     return () => { alive = false; };
   }, []);
@@ -38,13 +47,10 @@ export default function Evaluaciones() {
   // --- Estado tabla/paginación/filtros ---
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState("todos"); // todos | pendiente | asignado | en_progreso | completada | cancelada
-
+  const [status, setStatus] = useState("todos"); // pendiente | asignado | en_progreso | completada | cancelada | todos
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   // --- Asignar paciente ---
@@ -53,47 +59,84 @@ export default function Evaluaciones() {
   const cerrarAsignar = () => setSelectPaciente({ open: false, caseId: null });
   const asignarPaciente = async (pacienteId) => {
     if (!isAdmin) return;
-    const { error } = await supabase.from("casos").update({ paciente_id: pacienteId }).eq("id", selectPaciente.caseId);
+    const { error } = await supabase
+      .from("casos")
+      .update({ paciente_id: pacienteId })
+      .eq("id", selectPaciente.caseId);
     if (error) alert(error.message);
     cerrarAsignar();
-    await loadRef.current();
+    await loadRef.current?.();
   };
 
+  // --- Helper: marcar en_progreso al pulsar "Realizar" ---
+  const markInProgress = useCallback(
+    async (casoId, currentEstado, assignedTo) => {
+      if (!(isOperator && userId && assignedTo === userId)) return;
+      if (!["pendiente", "asignado"].includes(currentEstado)) return;
+
+      const { error } = await supabase
+        .from("casos")
+        .update({ estado: "en_progreso" })
+        .eq("id", casoId)
+        .eq("asignado_a", userId)
+        .in("estado", ["pendiente", "asignado"]);
+
+      if (!error) {
+        // Optimista en la grilla
+        setRows((prev) =>
+          prev.map((row) => (row.id === casoId ? { ...row, estado: "en_progreso" } : row))
+        );
+      } else {
+        console.warn("No se pudo marcar en_progreso:", error.message);
+      }
+    },
+    [isOperator, userId]
+  );
+
   // --- Carga de casos (desde la VISTA) ---
+  const reqRef = useRef(0); // anti-race
   const load = useCallback(async () => {
+    if (!authReady) return;
+
+    const myReq = ++reqRef.current;
     setLoading(true);
+
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
     let query = supabase
       .from("v_caso_resumen")
       .select(
-        `
-        id,
-        paciente_id,
-        paciente_nombre,
-        paciente_ci,
-        motivacion,
-        asignado_a,
-        operador_nombre,
-        creado_en,
-        estado
-        `,
+        "id,paciente_id,paciente_nombre,paciente_ci,motivacion,asignado_a,operador_nombre,creado_en,estado",
         { count: "exact" }
       )
       .order("creado_en", { ascending: false })
       .range(from, to);
 
+    // Operador: solo sus casos y no finalizados
+    if (isOperator && userId) {
+      query = query
+        .eq("asignado_a", userId)
+        .in("estado", ["pendiente", "asignado", "en_progreso"]);
+    }
+
+    // Búsqueda
     if (q.trim()) {
+      const term = `%${q.trim()}%`;
       query = query.or(
-        `paciente_nombre.ilike.%${q}%,paciente_ci.ilike.%${q}%,motivacion.ilike.%${q}%,operador_nombre.ilike.%${q}%`
+        `paciente_nombre.ilike.${term},paciente_ci.ilike.${term},motivacion.ilike.${term},operador_nombre.ilike.${term}`
       );
     }
+
+    // Filtro de estado
     if (status !== "todos") {
       query = query.eq("estado", status);
     }
 
     const { data, error, count } = await query;
+
+    if (myReq !== reqRef.current) return; // ignora respuestas viejas
+
     if (error) {
       console.error(error);
       setRows([]);
@@ -103,17 +146,18 @@ export default function Evaluaciones() {
       setTotal(count || 0);
     }
     setLoading(false);
-  }, [page, status, q]);
+  }, [authReady, page, status, q, isOperator, userId]);
 
   useEffect(() => { load(); }, [load]);
+
   const loadRef = useRef(load);
   useEffect(() => { loadRef.current = load; }, [load]);
 
-  // Realtime: refresca cuando cambie "casos"
+  // Realtime (opcional)
   useEffect(() => {
     const ch1 = supabase
       .channel("rt-casos")
-      .on("postgres_changes", { event: "*", schema: "public", table: "casos" }, () => loadRef.current())
+      .on("postgres_changes", { event: "*", schema: "public", table: "casos" }, () => loadRef.current?.())
       .subscribe();
     return () => supabase.removeChannel(ch1);
   }, []);
@@ -134,8 +178,9 @@ export default function Evaluaciones() {
 
   const closeModal = () => setModal({ open: false, mode: "create", initialCase: null });
 
-  const handleRealizar = (r) => {
-    // OJO: el viewer deberá elegir prueba y llamar a los RPC de progreso/completado.
+  // --- Realizar: marca en_progreso (solo caso) y navega ---
+  const handleRealizar = async (r) => {
+    await markInProgress(r.id, r.estado, r.asignado_a);
     const params = new URLSearchParams({
       case: r.id,
       nombre: r.paciente_nombre ?? "",
@@ -156,12 +201,13 @@ export default function Evaluaciones() {
   };
 
   const statusChip = (s) => (
-    <span className={`chip chip-${s}`}>
+    <span className={`chip chip-${s || "pendiente"}`}>
       {s === "pendiente" && "Pendiente"}
       {s === "asignado" && "Asignado"}
       {s === "en_progreso" && "En progreso"}
       {s === "completada" && "Completada"}
       {s === "cancelada" && "Cancelada"}
+      {!["pendiente","asignado","en_progreso","completada","cancelada"].includes(s) && s}
     </span>
   );
 
@@ -173,6 +219,12 @@ export default function Evaluaciones() {
     for (let i = start; i <= end; i++) arr.push(i);
     return arr;
   }, [page, totalPages]);
+
+  const canShowRealizar = (r) =>
+    isOperator && userId && r.asignado_a === userId &&
+    ["asignado", "en_progreso", "pendiente"].includes(r.estado);
+
+  const canShowView = (r) => isAssistant || isAdmin || canShowRealizar(r);
 
   return (
     <div className="evaluaciones-page">
@@ -242,11 +294,8 @@ export default function Evaluaciones() {
             )}
 
             {!loading && rows.map((r) => {
-              const canDoTest = isOperator && userId && r.asignado_a === userId && ["asignado","en_progreso"].includes(r.estado);
               const canEdit = isAdmin;
               const canDelete = isAdmin;
-              const canView = isAssistant || canEdit || canDoTest;
-              const canAssignPatient = isAdmin;
 
               return (
                 <tr key={r.id}>
@@ -267,7 +316,7 @@ export default function Evaluaciones() {
 
                   <td className="col-acciones">
                     <div className="actions-wrap">
-                      {canAssignPatient && !r.paciente_nombre && (
+                      {isAdmin && !r.paciente_nombre && (
                         <button
                           className="btn btn-sm btn-light"
                           title="Asignar paciente"
@@ -277,13 +326,17 @@ export default function Evaluaciones() {
                         </button>
                       )}
 
-                      {canDoTest && (
-                        <button className="btn btn-sm btn-primary" title="Realizar" onClick={() => handleRealizar(r)}>
+                      {canShowRealizar(r) && (
+                        <button
+                          className="btn btn-sm btn-primary"
+                          title="Realizar"
+                          onClick={() => handleRealizar(r)}
+                        >
                           <FaPlay /><span>Realizar</span>
                         </button>
                       )}
 
-                      {canView && (
+                      {canShowView(r) && (
                         <button className="btn btn-sm btn-light" title="Ver" onClick={() => openView(r)}>
                           <FaEye /><span>Ver</span>
                         </button>
@@ -314,7 +367,9 @@ export default function Evaluaciones() {
           <button className="pg" disabled={page === 1} onClick={() => setPage(1)} aria-label="Primera">«</button>
           <button className="pg" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))} aria-label="Anterior">‹</button>
           {pagesToShow.map((n) => (
-            <button key={n} className={`pg ${n === page ? "current" : ""}`} onClick={() => setPage(n)}>{n}</button>
+            <button key={n} className={`pg ${n === page ? "current" : ""}`} onClick={() => setPage(n)}>
+              {n}
+            </button>
           ))}
           <button className="pg" disabled={page === totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} aria-label="Siguiente">›</button>
           <button className="pg" disabled={page === totalPages} onClick={() => setPage(totalPages)} aria-label="Última">»</button>
