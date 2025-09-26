@@ -155,3 +155,22 @@
   justify-content: center;   /* 👈 centra los botones */
   margin-top: 12px;
 }
+
+/* Mejorar la sección de clasificación seleccionada */
+.result-body h4 {
+  font-size: 2rem; /* Aumentar el tamaño de la fuente */
+  font-weight: bold;
+  color: #ffffff; /* Color de texto blanco */
+  background-color: #0f766e; /* Fondo verde */
+  padding: 12px 20px;
+  border-radius: 10px; /* Bordes redondeados */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Sombra para hacerla más destacada */
+  text-align: center;
+  margin-top: 20px;
+}
+
+.result-body h4 span {
+  font-size: 1.2rem;
+  color: #ffffff; /* Resalta el texto de la clasificación */
+}
+

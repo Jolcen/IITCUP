@@ -265,10 +265,24 @@ function PerfilSimpleModal({ caso, perfil, onClose }) {
               Paciente: <strong>{caso?.paciente_nombre || "—"}</strong> · CI{" "}
               <strong>{caso?.paciente_ci || "—"}</strong>
             </p>
-            <h4 style={{ margin: "10px 0 6px" }}>
-              Clasificación seleccionada:&nbsp;
-              <span style={{ color: "#0f766e" }}>{perfil || "—"}</span>
+            <h4 style={{ margin: "10px 0 6px", textAlign: 'center' }}>
+              <span style={{ fontWeight: 'bold', display: 'block', fontSize: '1.2rem' }}>Clasificación seleccionada:</span>
+              <span 
+                style={{ 
+                  color: "#ffffff", 
+                  backgroundColor: "#0f766e", 
+                  padding: '16px 32px', 
+                  borderRadius: '12px', 
+                  fontSize: '2rem', 
+                  fontWeight: 'bold', 
+                  display: 'inline-block',
+                  marginTop: '10px'
+                }}
+              >
+                {perfil || "—"}
+              </span>
             </h4>
+
           </div>
         </div>
 
