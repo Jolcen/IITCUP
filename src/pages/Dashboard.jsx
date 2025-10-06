@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import CardStats from "../components/CardStats";
 import ChartEvaluations from "../components/ChartEvaluations";
-import RecentAttempts from "../components/RecentAttempts";
+import ChartProfilesPie from "../components/ChartProfilesPie"; // ⬅️ nuevo
 import FiltersBar from "../components/FiltersBar";
 import "../styles/Home.css";
 
@@ -14,6 +14,19 @@ function startOfNextYearISO() {
   const d = new Date(); d.setFullYear(d.getFullYear() + 1, 0, 1); d.setHours(0, 0, 0, 0);
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString();
 }
+
+// categorías esperadas (así controlamos el orden y mostramos 0 si no hay)
+const CATEGORIAS_PERFIL = [
+  "Antisocial",
+  "Ansiedad",
+  "Bipolar",
+  "Depresivo",
+  "Esquizofrenia",
+  "Límite",
+  "No clínico",
+  "Paranoide",
+  "Uso de Sustancias",
+];
 
 export default function Dashboard() {
   // filtros
@@ -33,11 +46,11 @@ export default function Dashboard() {
   const [pendientes, setPendientes] = useState(0);
   const [terminadas, setTerminadas] = useState(0);
 
-  // gráfico y tabla
+  // gráficos
   const [serieMes, setSerieMes] = useState([]);
-  const [recientes, setRecientes] = useState([]);
+  const [perfilesPie, setPerfilesPie] = useState([]);
 
-  // cargar pruebas para el filtro
+  // cargar pruebas
   useEffect(() => {
     (async () => {
       const { data, error } = await supabase.from("pruebas").select("id, nombre").order("nombre");
@@ -52,8 +65,7 @@ export default function Dashboard() {
         setErr("");
         setLoading(true);
 
-        // === KPIs === (usando la vista)
-        // Total
+        // === KPIs (vista v_dashboard_intentos) ===
         {
           let q = supabase.from("v_dashboard_intentos").select("*", { count: "exact", head: true });
           if (pruebaId) q = q.eq("prueba_id", pruebaId);
@@ -61,7 +73,6 @@ export default function Dashboard() {
           if (error) throw error;
           setTotal(count || 0);
         }
-        // Terminadas
         {
           let q = supabase.from("v_dashboard_intentos")
             .select("*", { count: "exact", head: true })
@@ -71,7 +82,6 @@ export default function Dashboard() {
           if (error) throw error;
           setTerminadas(count || 0);
         }
-        // Pendientes
         {
           let q = supabase.from("v_dashboard_intentos")
             .select("*", { count: "exact", head: true })
@@ -82,7 +92,7 @@ export default function Dashboard() {
           setPendientes(count || 0);
         }
 
-        // === Serie mensual (año actual) usando fecha_final (filtrado en cliente) ===
+        // === Serie mensual (barras) ===
         {
           const names = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
           const buckets = Array.from({ length: 12 }, () => 0);
@@ -97,7 +107,6 @@ export default function Dashboard() {
           const { data, error } = await q;
           if (error) throw error;
 
-          // Filtramos por rango en el cliente para evitar desfases de TZ
           const dDesde = new Date(desde);
           const dHasta = new Date(hasta);
 
@@ -112,29 +121,37 @@ export default function Dashboard() {
           setSerieMes(names.map((n, i) => ({ name: n, evaluaciones: buckets[i] })));
         }
 
-
-        // === Intentos recientes (usa fecha_final) ===
+        // === Perfiles diagnósticos (torta) ===
+        // Requiere la FK: perfiles_caso.intento_id -> intentos_prueba.id
         {
           let q = supabase
-            .from("v_dashboard_intentos")
-            .select("id, estado, fecha_final, iniciado_en, finalizado_en, ultimo_evento_en, prueba_nombre, paciente_nombre, prueba_id")
-            .order("ultimo_evento_en", { ascending: false, nullsFirst: false })
-            .limit(10);
+            .from("perfiles_caso")
+            .select("perfil_clinico, generated_at, intentos_prueba!inner(prueba_id)")
+            .not("perfil_clinico", "is", null)
+            .gte("generated_at", desde)
+            .lt("generated_at", hasta);
 
-          if (pruebaId) q = q.eq("prueba_id", pruebaId);
+          if (pruebaId) q = q.eq("intentos_prueba.prueba_id", pruebaId);
 
           const { data, error } = await q;
           if (error) throw error;
 
-          const rows = (data || []).map(r => ({
-            id: r.id,
-            estado: r.estado,
-            fecha: r.fecha_final,
-            prueba: r.prueba_nombre,
-            paciente: r.paciente_nombre
+          // Iniciamos con todas las categorías en 0
+          const counts = new Map(CATEGORIAS_PERFIL.map(n => [n, 0]));
+
+          (data || []).forEach(r => {
+            const key = (r.perfil_clinico || "No clínico").trim();
+            counts.set(key, (counts.get(key) || 0) + 1);
+          });
+
+          const pie = CATEGORIAS_PERFIL.map(name => ({
+            name,
+            value: counts.get(name) || 0,
           }));
-          setRecientes(rows);
+
+          setPerfilesPie(pie);
         }
+
       } catch (e) {
         console.error(e);
         setErr(e.message || "Error cargando dashboard");
@@ -166,12 +183,10 @@ export default function Dashboard() {
 
       <CardStats stats={stats} loading={loading} />
 
+      {/* Gráficos: barras + torta */}
       <div className="charts">
         <ChartEvaluations data={serieMes} loading={loading} />
-      </div>
-
-      <div className="tables">
-        <RecentAttempts rows={recientes} loading={loading} />
+        <ChartProfilesPie data={perfilesPie} loading={loading} />
       </div>
     </div>
   );

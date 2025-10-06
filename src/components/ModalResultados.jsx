@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { inferirIA } from "../services/ia";
 import "../styles/ModalResultados.css";
 
 const PRUEBA_IMG = {
@@ -9,100 +10,176 @@ const PRUEBA_IMG = {
   DEFAULT: "static/images/testP.jpg",
 };
 
-const CLASES = [
-  "No_clinico",
-  "Ansiedad",
-  "Depresivo",
-  "Uso_Sustancias",
-  "Antisocial",
-  "Paranoide",
-  "Psicótico/Esquizofrenia",
-  "Bipolar",
-  "Límite",
-];
+/** Normaliza aportes (magnitud) -> % */
+function calcularPorcentajes(topFeatures = []) {
+  const mags = topFeatures.map((t) => Math.abs(t.aporte));
+  const total = mags.reduce((a, b) => a + b, 0) || 1;
+  return topFeatures.map((t) => ({
+    ...t,
+    aporte_pct: (Math.abs(t.aporte) / total) * 100,
+  }));
+}
 
 export default function ModalResultados({ open, onClose, caso }) {
   const [loading, setLoading] = useState(false);
   const [tests, setTests] = useState([]);
 
-  const [showPerfil, setShowPerfil] = useState(false);
-  const [perfilSeleccionado, setPerfilSeleccionado] = useState(null);
-
-  const [showDetalle, setShowDetalle] = useState(false);
+  const [detalleOpen, setDetalleOpen] = useState(false);
   const [detalleTest, setDetalleTest] = useState(null);
   const [puntajes, setPuntajes] = useState([]);
-  const [puntajesLoading, setPuntajesLoading] = useState(false);
 
+  const [generando, setGenerando] = useState(false);
+  const [perfilIA, setPerfilIA] = useState(null);
+  const [perfilGuardado, setPerfilGuardado] = useState(null);
+
+  // Carga tarjetas y último perfil
   useEffect(() => {
     if (!open || !caso?.id) return;
-
     (async () => {
       setLoading(true);
-      setTests([]);
       try {
-        const { data: fin, error: eFin } = await supabase.rpc(
+        const { data: fin, error } = await supabase.rpc(
           "api_pruebas_finalizadas_por_caso",
           { p_caso: caso.id }
         );
-        if (eFin) throw eFin;
+        if (error) throw error;
 
         const list = (fin || []).map((p) => ({
           id: p?.prueba_id || p?.id,
           codigo: p?.codigo,
           nombre: p?.nombre || p?.codigo,
           img: PRUEBA_IMG[p?.codigo] || PRUEBA_IMG.DEFAULT,
-          done: true,
           intentoId: p?.intento_id || null,
           terminado_en: p?.terminado_en || null,
         }));
-
         setTests(list);
+
+        const { data: last, error: e2 } = await supabase
+          .from("perfiles_caso")
+          .select("id, model_version, perfil_clinico, probabilidad, generated_at")
+          .eq("caso_id", caso.id)
+          .order("generated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!e2) setPerfilGuardado(last || null);
       } catch (e) {
-        console.error(e);
+        console.error("carga inicial", e);
       } finally {
         setLoading(false);
       }
     })();
   }, [open, caso?.id]);
 
+  // Detalle prueba
   async function abrirDetalle(t) {
-    if (!t?.done || !t?.intentoId) return;
+    if (!t?.intentoId) return;
     setDetalleTest(t);
-    setShowDetalle(true);
+    setDetalleOpen(true);
     setPuntajes([]);
-    setPuntajesLoading(true);
     try {
-      const { data, error } = await supabase.rpc(
-        "api_puntajes_por_intento", // ← NUEVA RPC solo-lectura
-        { p_intento_id: t.intentoId, p_solo_validos: false }
-      );
+      const { data, error } = await supabase.rpc("api_puntajes_por_intento", {
+        p_intento_id: t.intentoId,
+        p_solo_validos: false,
+      });
       if (error) throw error;
 
-      const norm = (data || []).map((r) => ({
+      const rows = (data || []).map((r) => ({
         escala: r.escala_codigo,
         nombre: r.escala_nombre ?? r.escala_codigo,
         bruto: r.puntaje_bruto ?? null,
-        puntaje: r.puntaje_convertido ?? null,
+        puntaje: r.puntaje_convertido ?? r.puntaje_t ?? r.puntaje_bruto ?? null,
       }));
-      setPuntajes(norm);
+      setPuntajes(rows);
     } catch (e) {
-      console.error("RPC api_puntajes_por_intento", e);
+      console.error("api_puntajes_por_intento", e);
       setPuntajes([]);
-    } finally {
-      setPuntajesLoading(false);
     }
   }
-
   function cerrarDetalle() {
-    setShowDetalle(false);
+    setDetalleOpen(false);
     setDetalleTest(null);
     setPuntajes([]);
   }
 
-  function generarPerfilSimple() {
-    const idx = Math.floor(Math.random() * CLASES.length);
-    setPerfilSeleccionado(CLASES[idx]);
-    setShowPerfil(true);
+  // Armado de features del caso (con banderas)
+  async function recolectarFeaturesCaso() {
+    const { data: fin, error } = await supabase.rpc(
+      "api_pruebas_finalizadas_por_caso",
+      { p_caso: caso.id }
+    );
+    if (error) throw error;
+
+    const intentos = (fin || [])
+      .map((p) => ({ codigo: p?.codigo, intentoId: p?.intento_id }))
+      .filter((x) => x.intentoId);
+
+    const presentes = new Set(intentos.map((i) => i.codigo));
+    const features = {
+      tiene_PAI: presentes.has("PAI") ? 1 : 0,
+      tiene_MCMI: presentes.has("MCMI-IV") ? 1 : 0,
+      tiene_MMPI: presentes.has("MMPI-2") ? 1 : 0,
+    };
+
+
+    for (const it of intentos) {
+      const { data, error: e2 } = await supabase.rpc("api_puntajes_por_intento", {
+        p_intento_id: it.intentoId,
+        p_solo_validos: false,
+      });
+      if (e2) throw e2;
+
+      for (const r of data || []) {
+        const code = r.escala_codigo;
+        const val = r.puntaje_convertido ?? r.puntaje_t ?? r.puntaje_bruto ?? null;
+        if (code && typeof val === "number" && Number.isFinite(val)) {
+          features[code] = Number(val);
+        }
+      }
+    }
+    return features;
+  }
+
+  // Generar y guardar
+  async function generarPerfilCasoIA() {
+    try {
+      setGenerando(true);
+      const features = await recolectarFeaturesCaso();
+      const resp = await inferirIA(features, { explain: true, topK: 5, debug: true, log: true });
+
+      const { data: ins, error: eIns } = await supabase
+        .from("perfiles_caso")
+        .insert([{
+          caso_id: caso.id,
+          model_version: resp.model_version,
+          perfil_clinico: resp.perfil_clinico,
+          probabilidad: resp.probabilidad,
+        }])
+        .select()
+        .single();
+
+      if (!eIns) setPerfilGuardado(ins || null);
+      setPerfilIA(resp);
+    } catch (e) {
+      console.error("generarPerfilCasoIA", e);
+      alert(e.message ?? e);
+    } finally {
+      setGenerando(false);
+    }
+  }
+
+  // Visualizar (no guarda)
+  async function visualizarPerfilGuardado() {
+    try {
+      setGenerando(true);
+      const features = await recolectarFeaturesCaso();
+      const resp = await inferirIA(features, { explain: true, topK: 5, debug: true, log: true });
+      setPerfilIA(resp);
+    } catch (e) {
+      console.error("visualizarPerfilGuardado", e);
+      alert(e.message ?? e);
+    } finally {
+      setGenerando(false);
+    }
   }
 
   if (!open) return null;
@@ -127,46 +204,57 @@ export default function ModalResultados({ open, onClose, caso }) {
           </p>
         )}
 
-        {loading && <div className="muted mr-pad-12">Cargando…</div>}
-
-        {!loading && (
-          <>
-            {tests.length === 0 ? (
-              <div className="muted mr-pad-12">No hay pruebas finalizadas para este caso.</div>
-            ) : (
-              <div className="mr-grid">
-                {tests.map((t) => (
-                  <div
-                    key={t.id}
-                    className="mr-card done"
-                    onClick={() => abrirDetalle(t)}
-                    title="Ver resultados de esta prueba"
-                    role="button"
-                  >
-                    <span className="mr-badge mr-badge--done">✔ Completada</span>
-                    <div className="mr-card__imgwrap">
-                      <img src={t.img} alt={t.codigo} className="mr-card__img" />
-                    </div>
-                    <div className="mr-card__title">{t.nombre}</div>
-                    {t.terminado_en && (
-                      <div className="mr-card__meta">
-                        <small>{new Date(t.terminado_en).toLocaleString()}</small>
-                      </div>
-                    )}
+        {loading ? (
+          <div className="muted mr-pad-12">Cargando…</div>
+        ) : tests.length === 0 ? (
+          <div className="muted mr-pad-12">No hay pruebas finalizadas para este caso.</div>
+        ) : (
+          <div className="mr-grid">
+            {tests.map((t) => (
+              <div
+                key={t.id}
+                className="mr-card done"
+                onClick={() => abrirDetalle(t)}
+                role="button"
+                title="Ver resultados de esta prueba"
+              >
+                <span className="mr-badge mr-badge--done">✔ Completada</span>
+                <div className="mr-card__imgwrap">
+                  <img className="mr-card__img" src={t.img} alt={t.codigo} />
+                </div>
+                <div className="mr-card__title">{t.nombre}</div>
+                {t.terminado_en && (
+                  <div className="mr-card__meta">
+                    <small>{new Date(t.terminado_en).toLocaleString()}</small>
                   </div>
-                ))}
+                )}
               </div>
-            )}
-          </>
+            ))}
+          </div>
         )}
 
         <div className="mr-actions">
-          <button className="btn-primary mr-btn" onClick={generarPerfilSimple} title="Generar perfil">
-            Generar perfil
-          </button>
+          {!perfilGuardado ? (
+            <button
+              className={`btn-primary mr-btn ${generando ? "mr-btn--disabled" : ""}`}
+              onClick={generarPerfilCasoIA}
+              disabled={generando}
+            >
+              {generando ? "Generando…" : "Generar perfil IA del caso"}
+            </button>
+          ) : (
+            <button
+              className={`btn-primary mr-btn ${generando ? "mr-btn--disabled" : ""}`}
+              onClick={visualizarPerfilGuardado}
+              disabled={generando}
+            >
+              {generando ? "Abriendo…" : "Visualizar perfil IA"}
+            </button>
+          )}
         </div>
 
-        {showDetalle && (
+        {/* ===== Detalle de prueba ===== */}
+        {detalleOpen && (
           <div
             className="modal-overlay nested"
             onMouseDown={(e) => {
@@ -175,21 +263,16 @@ export default function ModalResultados({ open, onClose, caso }) {
           >
             <div className="modal result-modal" onMouseDown={(e) => e.stopPropagation()}>
               <div className="modal-head mr-detail-head">
-                <button className="close mr-detail-close" onClick={cerrarDetalle} aria-label="Cerrar">
-                  ✕
-                </button>
+                <button className="close mr-detail-close" onClick={cerrarDetalle}>✕</button>
                 <h3 className="mr-detail-title">
                   {`Resultados de prueba - ${detalleTest?.codigo || ""}`}
                 </h3>
               </div>
 
               <div className="result-body mr-detail-body">
-                {puntajesLoading && <div className="muted">Cargando puntajes…</div>}
-                {!puntajesLoading && puntajes.length === 0 && (
-                  <div className="muted">Aún no hay resultados calculados para esta prueba.</div>
-                )}
-
-                {!puntajesLoading && puntajes.length > 0 && (
+                {puntajes.length === 0 ? (
+                  <div className="muted">Cargando / sin resultados…</div>
+                ) : (
                   <table className="table-mini mr-result-table">
                     <thead>
                       <tr>
@@ -200,7 +283,7 @@ export default function ModalResultados({ open, onClose, caso }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {puntajes.slice(0, 200).map((r, i) => (
+                      {puntajes.slice(0, 400).map((r, i) => (
                         <tr key={i}>
                           <td>{r.escala}</td>
                           <td>{r.nombre || "—"}</td>
@@ -220,48 +303,73 @@ export default function ModalResultados({ open, onClose, caso }) {
           </div>
         )}
 
-        {showPerfil && (
-          <PerfilSimpleModal
-            caso={caso}
-            perfil={perfilSeleccionado}
-            onClose={() => setShowPerfil(false)}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
+        {/* ===== Perfil IA (vertical: chip arriba, tabla debajo) ===== */}
+        {perfilIA && (
+          <div
+            className="modal-overlay nested"
+            onMouseDown={(e) => {
+              if (e.target.classList.contains("modal-overlay")) setPerfilIA(null);
+            }}
+          >
+            <div className="modal result-modal" onMouseDown={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <h3>Perfil IA</h3>
+                <button className="close" onClick={() => setPerfilIA(null)}>✕</button>
+              </div>
 
-function PerfilSimpleModal({ caso, perfil, onClose }) {
-  return (
-    <div
-      className="modal-overlay nested"
-      onMouseDown={(e) => {
-        if (e.target.classList.contains("modal-overlay")) onClose?.();
-      }}
-    >
-      <div className="modal result-modal" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <h3>Perfil determinado</h3>
-          <button className="close" onClick={onClose}>✕</button>
-        </div>
+              <div className="result-body perfil-wrap">
+                <div className="perfil-hero">
+                  <span className="perfil-chip">{perfilIA.perfil_clinico}</span>
+                  <div className="conf-badge">
+                    Confianza: {(perfilIA.probabilidad * 100).toFixed(1)}%
+                  </div>
+                </div>
 
-        <div className="result-body">
-          <div className="mr-perfil-card">
-            <p className="mr-perfil-paciente">
-              Paciente: <strong>{caso?.paciente_nombre || "—"}</strong> · CI{" "}
-              <strong>{caso?.paciente_ci || "—"}</strong>
-            </p>
-            <h4 className="mr-perfil-title">
-              <span className="mr-perfil-chip">{perfil || "—"}</span>
-            </h4>
+                <h5 className="perfil-subtitle">Escalas que más aportaron</h5>
+
+                {(() => {
+                  const top = calcularPorcentajes(perfilIA.explicacion?.top_features || []);
+                  return (
+                    <table className="table-mini mr-result-table perfil-table">
+                      <thead>
+                        <tr>
+                          <th>Escala</th>
+                          <th>Valor</th>
+                          <th>Aporte</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {top.map((tf, i) => (
+                          <tr key={i}>
+                            <td>{tf.feature}</td>
+                            <td>{tf.valor}</td>
+                            <td>
+                              <div className="aporte-row">
+                                <div className="aporte-bar" aria-label="aporte relativo">
+                                  <div
+                                    className="aporte-fill"
+                                    style={{ width: `${Math.max(2, Math.min(100, tf.aporte_pct))}%` }}
+                                  />
+                                </div>
+                                <div className="aporte-pct">
+                                  {tf.aporte_pct.toFixed(1)}%
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  );
+                })()}
+              </div>
+
+              <div className="result-actions">
+                <button className="btn-soft" onClick={() => setPerfilIA(null)}>Cerrar</button>
+              </div>
+            </div>
           </div>
-        </div>
-
-        <div className="result-actions">
-          <button className="btn-soft" disabled title="Pronto">📄 Descargar perfil</button>
-          <button className="btn-soft" onClick={onClose}>Cerrar</button>
-        </div>
+        )}
       </div>
     </div>
   );

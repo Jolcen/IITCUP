@@ -1,7 +1,8 @@
-// src/pages/System.jsx
 import "../styles/System.css";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+
+const PAGE_LIMIT = 20; // <= máximo de registros a mostrar
 
 export default function System() {
   // ---------------- Estado principal ----------------
@@ -21,7 +22,7 @@ export default function System() {
   const [ultimoBackup, setUltimoBackup] = useState(null);
   const [backupTarget, setBackupTarget] = useState("");
 
-  // notificaciones (JS puro, sin tipos)
+  // notificaciones
   const [emails, setEmails] = useState([]);
   const [nuevoEmail, setNuevoEmail] = useState("");
   const [notificar, setNotificar] = useState(false);
@@ -128,11 +129,11 @@ export default function System() {
       const { data, error } = await supabase.rpc("admin_list_logs", {
         p_q: query || null,
         p_level,
-        p_limit: 100,
+        p_limit: PAGE_LIMIT, 
         p_offset: 0,
       });
       if (error) throw error;
-      setEvents(data || []);
+      setEvents(Array.isArray(data) ? data.slice(0, PAGE_LIMIT) : []); // <= doble seguridad
     } catch {
       // ignorar
     } finally {
@@ -142,7 +143,10 @@ export default function System() {
 
   useEffect(() => { loadEvents(); }, [levelFilter, query]);
 
-  const filteredEvents = useMemo(() => events, [events]);
+  const filteredEvents = useMemo(
+    () => (Array.isArray(events) ? events.slice(0, PAGE_LIMIT) : []),
+    [events]
+  );
 
   // ---------------------------- UI ----------------------------
   return (
@@ -249,7 +253,7 @@ export default function System() {
           </button>
         </div>
 
-        {/* ---------- EVENTOS DEL SISTEMA ----------- */}
+        {/* ---------- EVENTOS DEL SISTEMA (panel con altura fija + scroll) ----------- */}
         <div className="card eventos">
           <div className="eventos-head">
             <h3>🗂️ Eventos del Sistema</h3>
@@ -299,6 +303,11 @@ export default function System() {
                 </li>
               ))}
             </ul>
+          </div>
+
+          <div className="eventos-foot">
+            <span>Ultimos {filteredEvents.length} logs </span>
+            {/* Si luego quieres paginar, aquí va un botón "Ver más" */}
           </div>
         </div>
       </aside>

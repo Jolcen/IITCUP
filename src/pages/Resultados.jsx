@@ -69,8 +69,6 @@ export default function Resultados() {
 
   return (
     <div className="resultado-page" style={{ padding: 20 }}>
-      <h2 style={{ marginTop: 0 }}>Resultados</h2>
-
       <div style={{ display: "flex", gap: 12, alignItems: "center", margin: "10px 0 16px" }}>
         <div className="searchbox" style={{ display: "flex", alignItems: "center", gap: 8 }}>
           🔍

@@ -1,261 +1,252 @@
-/* ModalResultados — estilos específicos (prefijo mr- para no chocar) */
+/* ===========================
+   ModalResultados — estilos
+   =========================== */
 
+/* ---------- Modal principal ---------- */
 .mr-modal {
   width: min(1100px, 96vw);
-  /* deja respirar verticalmente el contenido */
   max-height: 88vh;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* evita DOBLE scroll */
 }
 
-/* Encabezado y paciente */
+/* Head + paciente */
 .mr-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
 }
 .mr-paciente {
-  margin: 6px 0 14px;
+  margin: 6px 0 12px;
   color: var(--muted);
 }
-.mr-bold {
-  color: var(--text);
-  font-weight: 700;
-}
+.mr-bold { font-weight: 700; color: var(--text); }
 
-/* GRID */
-.mr-grid {
+/* ---------- Grid de pruebas (centrado y fluido) ---------- */
+.mr-grid{
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 18px;
   padding: 8px 4px 4px;
+  align-items: stretch;
 }
-
-/* Card */
 .mr-card {
   position: relative;
-  background: #ffffff;
-  border: 2px solid var(--border);
+  background: #fff;
+  border: 2px solid var(--border, #e5e7eb);
   border-radius: 16px;
   padding: 12px;
   text-align: center;
-  box-shadow: var(--shadow);
-  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease, filter .15s ease;
+  box-shadow: var(--shadow, 0 1px 2px rgba(0,0,0,.06));
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
 }
-.mr-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.mr-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg, 0 10px 20px rgba(0,0,0,.08)); }
+.mr-card.done { border-color: #22c55e; box-shadow: 0 8px 24px rgba(34,197,94,.18); cursor: pointer; }
 
-/* Estados */
-.mr-card.done {
-  border-color: #22c55e;
-  box-shadow: 0 8px 24px rgba(34,197,94,.18);
-  cursor: pointer;
-}
-.mr-card.pending {
-  cursor: default;
-  filter: grayscale(.08);
-}
-
-/* Imagen más alta para que se vean mejor */
 .mr-card__imgwrap {
-  width: 100%;
-  height: 240px; /* <-- ALTURA AUMENTADA */
-  border-radius: 12px;
-  overflow: hidden;
-  background: #f8fafc;
-  display: grid;
-  place-items: center;
+  width: 100%; height: 200px; border-radius: 12px; overflow: hidden;
+  background: #f8fafc; display: grid; place-items: center;
   box-shadow: inset 0 0 0 1px rgba(0,0,0,.03);
 }
-.mr-card__img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-/* Título */
-.mr-card__title {
-  font-size: 0.95rem;
-  margin-top: 10px;
-  color: var(--text);
-}
-
-/* Meta */
-.mr-card__meta small {
-  color: var(--muted);
-}
-
-/* Badges */
+.mr-card__img { width: 100%; height: 100%; object-fit: cover; }
+.mr-card__title { font-size: .95rem; margin-top: 10px; color: var(--text); }
+.mr-card__meta small { color: var(--muted); }
 .mr-badge {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: .75rem;
-  font-weight: 800;
+  position: absolute; top: 10px; left: 10px;
+  padding: 4px 10px; border-radius: 999px; font-size: .75rem; font-weight: 800;
   box-shadow: 0 4px 10px rgba(0,0,0,.08);
 }
-.mr-badge--done {
-  background: #22c55e;
-  color: #fff;
-  box-shadow: 0 4px 10px rgba(34,197,94,.35);
-}
-.mr-badge--pending {
-  background: #e2e8f0;
-  color: #475569;
-}
+.mr-badge--done { background: #22c55e; color: #fff; box-shadow: 0 4px 10px rgba(34,197,94,.35); }
 
-/* Acciones inferiores */
-.mr-actions {
-  margin-top: 18px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-/* Botón generar perfil */
-.mr-btn {
-  min-width: 220px;
-}
-.mr-btn--disabled {
-  opacity: .75;
-  cursor: not-allowed;
-  background: #f3f4f6 !important;
-  border: 1px solid var(--border) !important;
-  color: #94a3b8 !important;
-}
-
-/* Responsivo */
-@media (max-width: 980px) {
-  .mr-card__imgwrap { height: 220px; }
-}
-@media (max-width: 840px) {
-  .mr-grid { grid-template-columns: repeat(2, 1fr); }
-  .mr-card__imgwrap { height: 210px; }
-}
-@media (max-width: 560px) {
-  .mr-grid { grid-template-columns: 1fr; }
-  .mr-card__imgwrap { height: 200px; }
-}
-
-/* contenedor de tarjetas */
-.mr-grid{
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
-  justify-content: center;   /* 👈 centra horizontalmente */
-  align-items: stretch;      /* misma altura visual */
-  margin-top: 8px;
-}
-
-/* ancho “estable” para cada tarjeta */
-.mr-card{
-  width: 260px;              /* o 240–280px a tu gusto */
-}
-
-/* acciones abajo del modal */
+/* Acciones */
 .mr-actions{
-  display: flex;
-  gap: 8px;
-  justify-content: center;   /* 👈 centra los botones */
-  margin-top: 12px;
+  display: flex; justify-content: center; gap: 10px;
+  margin: 12px 0 6px;
 }
+.mr-btn{ min-width: 240px; }
+.mr-btn--disabled{ opacity: .75; cursor: not-allowed; }
 
-/* ===== PERFIL DETERMINADO (antes estabas usando h4 global) ===== */
-.result-body h4 {
-  font-size: 2rem;
-  font-weight: bold;
-  color: #ffffff;
-  background-color: #0f766e;
-  padding: 12px 20px;
-  border-radius: 10px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  text-align: center;
-  margin-top: 20px;
+/* ---------- Modal DETALLE de prueba (un solo scroll) ---------- */
+.result-modal{
+  width: min(980px, 96vw);
+  max-height: 88vh;
+  display: flex; flex-direction: column;
+  overflow: hidden; /* 1 scroll */
 }
-.result-body h4 span {
-  font-size: 1.2rem;
-  color: #ffffff;
-}
-
-/* ====== NUEVOS ESTILOS (detalle de resultados sin inline) ====== */
-
-/* Utilidad */
-.mr-pad-12 { padding: 12px; }
-
-/* Encabezado sticky del DETALLE */
 .mr-detail-head{
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: #fff;
-  border-bottom: 1px solid var(--border);
-  padding: 10px 12px;
+  position: sticky; top: 0; z-index: 5;
+  background: #fff; border-bottom: 1px solid var(--border, #e5e7eb);
+  padding: 10px 12px; display: flex; align-items: center; justify-content: center;
 }
-.mr-detail-title{
-  margin: 0;
-  text-align: center;
-}
-.mr-detail-close{
-  position: absolute;
-  right: 12px;
-  top: 10px;
-}
+.mr-detail-title{ margin: 0; }
+.mr-detail-close{ position: absolute; right: 12px; top: 10px; }
 
-/* Cuerpo scrollable del detalle */
 .mr-detail-body{
-  max-height: 70vh;
-  overflow: auto;
+  flex: 1; overflow: auto; padding: 8px 12px 12px; /* ÚNICO scroll */
 }
 
-/* Tabla de resultados /escala/nombre/bruto/puntaje */
-.mr-result-table{
-  width: 100%;
-  border-collapse: collapse;
-}
+/* Tabla mini */
+.mr-result-table{ width: 100%; border-collapse: collapse; background: #fff; }
 .mr-result-table thead{
-  position: sticky;
-  top: 0;
-  background: #f9fafb;
-  z-index: 4;
+  position: sticky; top: 0; z-index: 4;
+  background: #f9fafb; border-bottom: 1px solid var(--border, #e5e7eb);
 }
-.mr-result-table th,
-.mr-result-table td{
-  padding: 8px;
-  text-align: left;
+.mr-result-table th, .mr-result-table td{
+  padding: 10px 12px; text-align: left; border-bottom: 1px solid #f1f5f9;
 }
-.mr-result-table tbody tr:nth-child(odd){
-  background: #fafafa;
-}
+.mr-result-table tbody tr:nth-child(odd){ background: #fafafa; }
 
-/* Acciones del detalle */
 .mr-detail-actions{
-  text-align: right;
-  margin-top: 10px;
-  padding-top: 8px;
+  padding: 10px 12px; border-top: 1px solid var(--border, #e5e7eb);
+  display: flex; justify-content: flex-end;
 }
 
-/* PERFIL: estilos específicos (sobre-escriben los globales si es necesario) */
-.mr-perfil-card{ margin-top: 6px; }
-.mr-perfil-paciente{
-  margin: 0;
-  color: #64748b;
-  font-size: 13px;
-}
-.mr-perfil-title{
-  margin: 10px 0 6px;
+/* ---------- PERFIL IA (ahora vertical) ---------- */
+
+.perfil-wrap{ padding: 8px 16px 16px; }
+
+/* Cabecera arriba (perfil + confianza) */
+.perfil-hero{
+  width: 100%;
+  display: flex;
+  flex-direction: column;   /* <-- vertical */
+  align-items: center;
   text-align: center;
-  background: transparent;   /* sobreescribe el global si aplica */
-  box-shadow: none;
-  padding: 0;
+  gap: 10px;
+  background: linear-gradient(135deg, #14b8a6 0%, #0f766e 100%);
+  color: #fff; border-radius: 16px;
+  padding: 18px 20px;
+  box-shadow: 0 10px 24px rgba(14,165,164,.22);
+  margin-bottom: 14px;
 }
-.mr-perfil-chip{
-  color: #ffffff;
-  background-color: #0f766e;
-  padding: 16px 32px;
-  border-radius: 12px;
-  font-size: 2rem;
-  font-weight: bold;
+.perfil-chip{
   display: inline-block;
-  margin-top: 10px;
+  font-size: 1.35rem;       /* más grande */
+  font-weight: 800;
+  background: rgba(255,255,255,.16);
+  padding: 12px 22px;
+  border-radius: 999px;
 }
+.conf-badge{
+  font-weight: 800;
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.25);
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+
+/* Subtítulo centrado */
+.perfil-subtitle{
+  text-align: center;
+  margin: 0 0 8px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+/* Tabla Perfil */
+.perfil-table { margin-top: 6px; }
+
+/* Barra de aporte (%) */
+.aporte-row { display: flex; align-items: center; gap: 10px; }
+.aporte-bar {
+  flex: 1; height: 8px; background: #e2e8f0;
+  border-radius: 999px; overflow: hidden;
+}
+.aporte-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #14b8a6, #0ea5a4);
+  border-radius: 999px;
+}
+.aporte-pct {
+  min-width: 56px; text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #0f766e; font-weight: 700;
+}
+
+/* Limpia estilos globales viejos */
+.result-body h4 { all: unset; }
+
+/* Responsive */
+@media (max-width: 680px){
+  .mr-card__imgwrap { height: 180px; }
+}
+
+/* ==== PATCH: PERFIL IA VERTICAL, SIN SIDEBAR IZQUIERDA ==== */
+
+/* Fuerza contenedor del perfil a ser columna */
+.perfil-wrap,
+.result-modal .result-body.perfil-wrap,
+.result-modal .result-body .perfil-layout {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+}
+
+/* Oculta cualquier “panel/side” heredado del diseño antiguo */
+.mr-perfil-card,
+.perfil-left,
+.perfil-side,
+.perfil-aside,
+.perfil-ribbon,
+.perfil-sash,
+.perfil-badge-col {
+  display: none !important;
+}
+
+/* Hero arriba (chip + confianza) */
+.perfil-hero {
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  text-align: center !important;
+  gap: 10px !important;
+  background: linear-gradient(135deg, #14b8a6 0%, #0f766e 100%) !important;
+  color: #fff !important;
+  border-radius: 16px !important;
+  padding: 18px 20px !important;
+  box-shadow: 0 10px 24px rgba(14,165,164,.22) !important;
+  margin-bottom: 14px !important;
+}
+
+/* Chip del diagnóstico */
+.perfil-chip {
+  display: inline-block !important;
+  font-size: 1.35rem !important;
+  font-weight: 800 !important;
+  background: rgba(255,255,255,.16) !important;
+  padding: 12px 22px !important;
+  border-radius: 999px !important;
+}
+
+/* Confianza debajo del chip */
+.conf-badge {
+  font-weight: 800 !important;
+  background: rgba(255,255,255,.12) !important;
+  border: 1px solid rgba(255,255,255,.25) !important;
+  padding: 8px 12px !important;
+  border-radius: 10px !important;
+}
+
+/* Subtítulo centrado */
+.perfil-subtitle {
+  text-align: center !important;
+  margin: 0 0 8px !important;
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
+/* Tabla del perfil debajo del hero */
+.perfil-table {
+  margin-top: 4px !important;
+}
+
+/* Barra de aporte en % */
+.aporte-row { display: flex !important; align-items: center !important; gap: 10px !important; }
+.aporte-bar { flex: 1 !important; height: 8px !important; background: #e2e8f0 !important; border-radius: 999px !important; overflow: hidden !important; }
+.aporte-fill { height: 100% !important; background: linear-gradient(90deg, #14b8a6, #0ea5a4) !important; border-radius: 999px !important; }
+.aporte-pct { min-width: 56px !important; text-align: right !important; font-variant-numeric: tabular-nums !important; color: #0f766e !important; font-weight: 700 !important; }
+
+/* Evita que cualquier h4 global viejo re-rompa el layout */
+.result-body h4 { all: unset !important; }

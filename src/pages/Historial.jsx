@@ -313,8 +313,6 @@ export default function Historial() {
   // ---------- Render ----------
   return (
     <div className="historial-page">
-      <h2>Historial de Evaluaciones</h2>
-
       {/* KPIs */}
       <div className="stats-cards">
         <div className="card">
@@ -364,7 +362,6 @@ export default function Historial() {
               <th>Prueba</th>
               <th>Fecha</th>
               <th>Responsable</th>
-              {/* Estado eliminado */}
               <th>Duración</th>
               <th>Firma</th>
             </tr>

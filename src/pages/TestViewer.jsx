@@ -402,8 +402,6 @@ export default function TestViewer() {
         });
         if (error) {
           console.error("Error al calcular puntajes:", error);
-        } else {
-          console.log("Puntajes calculados:", data);
         }
       }
 

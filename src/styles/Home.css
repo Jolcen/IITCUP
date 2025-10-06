@@ -75,3 +75,15 @@
 @media (max-width: 900px){
   .filters{ grid-template-columns: 1fr; }
 }
+
+
+.charts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 1100px) {
+  .charts {
+    grid-template-columns: 1fr 1fr; /* barras | torta */
+  }
+}

@@ -6,7 +6,7 @@ import "../styles/ChartEvaluations.css";
 export default function ChartEvaluations({ data = [], loading = false }) {
   return (
     <div className="chart-box panel">
-      <h3>Evaluaciones finalizadas por mes (año actual)</h3>
+      <h3>Evaluaciones finalizadas por mes</h3>
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={loading ? [] : data}>
           <CartesianGrid strokeDasharray="3 3" />
