@@ -233,3 +233,43 @@ tbody tr:hover{ background:#fafbff; }
   gap: 10px;
   align-items: center;
 }
+
+/* Firma en tabla */
+.firma-cell {
+  width: 96px; /* espacio estable */
+}
+.firma-thumb {
+  width: 80px;
+  height: 44px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  cursor: zoom-in;
+  display: inline-block;
+}
+
+/* Modal de firma */
+.firma-modal {
+  width: min(860px, 96vw);
+  max-height: 88vh;
+  overflow: auto;
+}
+.firma-modal-body {
+  padding: 8px 12px;
+}
+.firma-meta {
+  margin: 6px 0 12px;
+}
+.firma-modal-imgwrap {
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+  display: grid;
+  place-items: center;
+}
+.firma-modal-img {
+  max-width: 100%;
+  height: auto;
+}

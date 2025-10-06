@@ -1,14 +1,11 @@
 // src/pages/Historial.jsx
 import "../styles/Historial.css";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
 const PAGE_SIZE = 10;
 
 export default function Historial() {
-  const navigate = useNavigate();
-
   // KPIs
   const [kpis, setKpis] = useState({ totalIntentos: 0, totalCompletas: 0, loading: true });
 
@@ -24,6 +21,10 @@ export default function Historial() {
 
   // Cache responsables
   const [userMap, setUserMap] = useState({});
+
+  // Modal de firma
+  const [showFirma, setShowFirma] = useState(false);
+  const [firmaSel, setFirmaSel] = useState(null); // { url, paciente, firmado_en }
 
   // ---------- KPIs ----------
   useEffect(() => {
@@ -53,6 +54,20 @@ export default function Historial() {
     return () => { alive = false; };
   }, []);
 
+  // Helper: URL firmada (con fallback a pública)
+  async function getFileUrl(bucket, path, expiresSec = 3600) {
+    try {
+      const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresSec);
+      if (!error && data?.signedUrl) return data.signedUrl;
+    } catch (_) { /* ignore */ }
+    try {
+      const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+      return data?.publicUrl || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ---------- Tabla ----------
   useEffect(() => {
     let alive = true;
@@ -62,7 +77,7 @@ export default function Historial() {
         const from = (page - 1) * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        // 1) Intentos (sin joins)
+        // 1) Intentos
         const { data: intentos, error: errI, count } = await supabase
           .from("intentos_prueba")
           .select(
@@ -86,6 +101,7 @@ export default function Historial() {
 
         const casoIds = Array.from(new Set((intentos || []).map((x) => x.caso_id).filter(Boolean)));
         const pruebaIds = Array.from(new Set((intentos || []).map((x) => x.prueba_id).filter(Boolean)));
+        const intentoIds = Array.from(new Set((intentos || []).map((x) => x.id)));
 
         // 2) Casos
         let casosById = {};
@@ -98,7 +114,7 @@ export default function Historial() {
           casosById = Object.fromEntries((casos || []).map((c) => [c.id, c]));
         }
 
-        // 3) Pacientes (campos reales)
+        // 3) Pacientes
         const pacienteIds = Array.from(
           new Set(Object.values(casosById).map((c) => c.paciente_id).filter(Boolean))
         );
@@ -134,17 +150,40 @@ export default function Historial() {
           pruebasById = Object.fromEntries((pruebas || []).map((p) => [p.id, p]));
         }
 
-        // 5) Armar lista final
+        // 5) Firmas (última por intento)
+        let firmasByIntento = {};
+        if (intentoIds.length) {
+          const { data: firmas, error: errF } = await supabase
+            .from("firmas_intento")
+            .select("id,intento_id,firma_bucket,firma_path,firma_mime,firmado_en")
+            .in("intento_id", intentoIds)
+            .order("firmado_en", { ascending: false });
+          if (errF) throw errF;
+
+          (firmas || []).forEach((f) => {
+            if (!firmasByIntento[f.intento_id]) firmasByIntento[f.intento_id] = f;
+          });
+
+          const intentosConFirma = Object.values(firmasByIntento);
+          for (const f of intentosConFirma) {
+            if (f?.firma_bucket && f?.firma_path) {
+              f.url = await getFileUrl(f.firma_bucket, f.firma_path, 3600);
+            } else {
+              f.url = null;
+            }
+          }
+        }
+
+        // 6) Armar lista final
         let list = (intentos || []).map((r) => {
           const c = casosById[r.caso_id] || {};
           const p = c.paciente_id ? pacientesById[c.paciente_id] || {} : {};
           const pr = pruebasById[r.prueba_id] || {};
+          const firma = firmasByIntento[r.id] || null;
 
-          // Nombre y documento del paciente
           const paciente_nombre = [p.nombres, p.apellidos].filter(Boolean).join(" ") || "—";
           const documento = [p.doc_tipo, p.doc_numero, p.doc_expedido].filter(Boolean).join(" ") || "—";
 
-          // Estado
           const estado =
             r.terminado_en || r.finalizado_en
               ? "evaluado"
@@ -152,10 +191,8 @@ export default function Historial() {
               ? "en_evaluacion"
               : "pendiente";
 
-          // Fecha base
           const creado_en = c.creado_en ?? r.iniciado_en ?? null;
 
-          // Duración (minutos)
           let durSeg =
             typeof r.duracion_segundos === "number" ? r.duracion_segundos : null;
 
@@ -175,18 +212,21 @@ export default function Historial() {
 
           return {
             ...r,
-            estado,
+            estado, // ya no se muestra en la tabla, pero lo conservamos por si filtras
             paciente_nombre,
             paciente_doc: documento,
             motivacion: c.motivacion ?? "—",
             prueba_codigo: pr.codigo ?? "—",
             creado_en,
             asignado_a: c.asignado_a ?? null,
-            responsable: null,        // se completa abajo con userMap
-            duracion_minutos: durMin, // para UI
-            // Datos del paciente por si luego quieres usarlos:
-            foto_carnet_path: p.foto_carnet_path || null,
-            foto_carnet_bucket: p.foto_carnet_bucket || null,
+            responsable: null,
+            duracion_minutos: durMin,
+
+            // Firma
+            firma_url: firma?.url || null,
+            firma_bucket: firma?.firma_bucket || null,
+            firma_path: firma?.firma_path || null,
+            firmado_en: firma?.firmado_en || null,
           };
         });
 
@@ -221,7 +261,7 @@ export default function Historial() {
           if (errU) throw errU;
           const map = {};
           (users || []).forEach((u) => (map[u.id] = u.nombre || u.email || u.id));
-          if (alive) setUserMap((prev) => ({ ...prev, ...map }));
+          setUserMap((prev) => ({ ...prev, ...map }));
         }
 
         list = list.map((r) => ({
@@ -255,16 +295,19 @@ export default function Historial() {
     return arr;
   }, [page, totalPages]);
 
-  const renderEstado = (estado) => {
-    const s = estado || "pendiente";
-    const cls = s.replace("_", "-");
-    return (
-      <span className={`estado-tag ${cls}`}>
-        {s === "en_evaluacion" && "En evaluación"}
-        {s === "evaluado" && "Evaluado"}
-        {(s === "pendiente" || !s) && "Pendiente"}
-      </span>
-    );
+  // Modal firma
+  const openFirmaModal = (row) => {
+    if (!row?.firma_url) return;
+    setFirmaSel({
+      url: row.firma_url,
+      paciente: row.paciente_nombre,
+      firmado_en: row.firmado_en,
+    });
+    setShowFirma(true);
+  };
+  const closeFirmaModal = () => {
+    setShowFirma(false);
+    setFirmaSel(null);
   };
 
   // ---------- Render ----------
@@ -320,17 +363,16 @@ export default function Historial() {
               <th>Motivo</th>
               <th>Prueba</th>
               <th>Fecha</th>
-              <th>Resp.</th>
-              <th>Estado</th>
+              <th>Responsable</th>
+              {/* Estado eliminado */}
               <th>Duración</th>
               <th>Firma</th>
-              <th>Acción</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={10} className="muted">Sin registros</td>
+                <td colSpan={8} className="muted">Sin registros</td>
               </tr>
             )}
 
@@ -348,22 +390,20 @@ export default function Historial() {
                     : "—"}
                 </td>
                 <td>{r.responsable || "—"}</td>
-                <td>{renderEstado(r.estado)}</td>
+                {/* Estado eliminado */}
                 <td>
                   {r.terminado_en || r.finalizado_en
                     ? (r.duracion_minutos === "<1" ? "<1 min" : `${r.duracion_minutos} min`)
                     : "—"}
                 </td>
-                <td>—{/* si luego quieres mostrar firma, se reemplaza */}</td>
-                <td>
-                  {r.terminado_en || r.finalizado_en ? (
-                    <button
-                      className="btn-link"
-                      onClick={() => navigate(`/resultados/${r.id}?caso=${r.caso_id}`)}
-                      title="Ver resultado"
-                    >
-                      📄
-                    </button>
+                <td className="firma-cell">
+                  {r.firma_url ? (
+                    <img
+                      className="firma-thumb"
+                      src={r.firma_url}
+                      alt={`Firma de ${r.paciente_nombre || "paciente"}`}
+                      onClick={() => openFirmaModal(r)}
+                    />
                   ) : (
                     <span className="muted">—</span>
                   )}
@@ -384,6 +424,37 @@ export default function Historial() {
           <button className="pg" onClick={() => setPage(totalPages)} disabled={page === totalPages}>»</button>
         </div>
       </div>
+
+      {/* Modal de firma (imagen grande) */}
+      {showFirma && (
+        <div
+          className="modal-overlay"
+          onMouseDown={(e) => {
+            if (e.target.classList.contains("modal-overlay")) closeFirmaModal();
+          }}
+        >
+          <div className="modal firma-modal" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>Firma del paciente</h3>
+              <button className="close" onClick={closeFirmaModal}>✕</button>
+            </div>
+            <div className="firma-modal-body">
+              {firmaSel?.firmado_en && (
+                <p className="muted firma-meta">
+                  Firmado: {new Date(firmaSel.firmado_en).toLocaleString()}
+                </p>
+              )}
+              <div className="firma-modal-imgwrap">
+                <img className="firma-modal-img" src={firmaSel?.url || ""} alt="Firma" />
+              </div>
+            </div>
+            <div className="result-actions">
+              <a className="btn-soft" href={firmaSel?.url || "#"} target="_blank" rel="noreferrer">Abrir en nueva pestaña</a>
+              <button className="btn-soft" onClick={closeFirmaModal}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

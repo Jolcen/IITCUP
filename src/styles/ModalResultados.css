@@ -79,6 +79,11 @@
   color: var(--text);
 }
 
+/* Meta */
+.mr-card__meta small {
+  color: var(--muted);
+}
+
 /* Badges */
 .mr-badge {
   position: absolute;
@@ -156,21 +161,101 @@
   margin-top: 12px;
 }
 
-/* Mejorar la sección de clasificación seleccionada */
+/* ===== PERFIL DETERMINADO (antes estabas usando h4 global) ===== */
 .result-body h4 {
-  font-size: 2rem; /* Aumentar el tamaño de la fuente */
+  font-size: 2rem;
   font-weight: bold;
-  color: #ffffff; /* Color de texto blanco */
-  background-color: #0f766e; /* Fondo verde */
+  color: #ffffff;
+  background-color: #0f766e;
   padding: 12px 20px;
-  border-radius: 10px; /* Bordes redondeados */
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Sombra para hacerla más destacada */
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   text-align: center;
   margin-top: 20px;
 }
-
 .result-body h4 span {
   font-size: 1.2rem;
-  color: #ffffff; /* Resalta el texto de la clasificación */
+  color: #ffffff;
 }
 
+/* ====== NUEVOS ESTILOS (detalle de resultados sin inline) ====== */
+
+/* Utilidad */
+.mr-pad-12 { padding: 12px; }
+
+/* Encabezado sticky del DETALLE */
+.mr-detail-head{
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+}
+.mr-detail-title{
+  margin: 0;
+  text-align: center;
+}
+.mr-detail-close{
+  position: absolute;
+  right: 12px;
+  top: 10px;
+}
+
+/* Cuerpo scrollable del detalle */
+.mr-detail-body{
+  max-height: 70vh;
+  overflow: auto;
+}
+
+/* Tabla de resultados /escala/nombre/bruto/puntaje */
+.mr-result-table{
+  width: 100%;
+  border-collapse: collapse;
+}
+.mr-result-table thead{
+  position: sticky;
+  top: 0;
+  background: #f9fafb;
+  z-index: 4;
+}
+.mr-result-table th,
+.mr-result-table td{
+  padding: 8px;
+  text-align: left;
+}
+.mr-result-table tbody tr:nth-child(odd){
+  background: #fafafa;
+}
+
+/* Acciones del detalle */
+.mr-detail-actions{
+  text-align: right;
+  margin-top: 10px;
+  padding-top: 8px;
+}
+
+/* PERFIL: estilos específicos (sobre-escriben los globales si es necesario) */
+.mr-perfil-card{ margin-top: 6px; }
+.mr-perfil-paciente{
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+}
+.mr-perfil-title{
+  margin: 10px 0 6px;
+  text-align: center;
+  background: transparent;   /* sobreescribe el global si aplica */
+  box-shadow: none;
+  padding: 0;
+}
+.mr-perfil-chip{
+  color: #ffffff;
+  background-color: #0f766e;
+  padding: 16px 32px;
+  border-radius: 12px;
+  font-size: 2rem;
+  font-weight: bold;
+  display: inline-block;
+  margin-top: 10px;
+}

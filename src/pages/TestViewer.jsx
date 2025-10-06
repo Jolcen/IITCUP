@@ -117,33 +117,55 @@ export default function TestViewer() {
     return [];
   }
 
+  // === CORREGIDO: obtiene un número 'raw' para cualquier tipo de opción ===
   function getRawFromOption(q, opcionElegida) {
-    const opcion_txt = typeof opcionElegida === "string" ? opcionElegida : (opcionElegida?.label ?? String(opcionElegida));
-    if (!q?.opciones || q?.tipo !== "likert") return null;
+    const label = typeof opcionElegida === "string"
+      ? opcionElegida
+      : (opcionElegida?.label ?? String(opcionElegida));
 
-    if (Array.isArray(q.opciones)) {
-      const idx = q.opciones.findIndex((o) => (typeof o === "string" ? o : o?.label ?? o?.txt ?? "") === opcion_txt);
+    const norm = (s) =>
+      String(s ?? "")
+        .normalize("NFD").replace(/\p{Diacritic}/gu, "")
+        .trim().toLowerCase();
+
+    const t = norm(label);
+
+    // Booleanos típicos (MMPI-2 / MCMI-IV)
+    if (t === "verdadero" || t === "true" || t === "si" || t === "sí") return 1;
+    if (t === "falso" || t === "false" || t === "no") return 0;
+
+    // Likert PAI
+    if (t === "nada")  return 0;
+    if (t === "poco")  return 1;
+    if (t === "algo")  return 2;
+    if (t === "mucho") return 3;
+
+    // Si hay estructura con valores numéricos, úsalos
+    if (Array.isArray(q?.opciones)) {
+      const idx = q.opciones.findIndex((o) => {
+        const lbl = typeof o === "string" ? o : (o?.label ?? o?.txt ?? o?.text ?? "");
+        return norm(lbl) === t;
+      });
       if (idx >= 0) {
         const o = q.opciones[idx];
-        const cand = typeof o === "object" ? o.raw ?? o.value ?? o.score ?? o.puntaje : undefined;
-        if (cand !== undefined && Number.isFinite(Number(cand))) return Number(cand);
+        if (o && typeof o === "object") {
+          const cand = o.raw ?? o.value ?? o.score ?? o.puntaje;
+          if (cand !== undefined && Number.isFinite(Number(cand))) return Number(cand);
+        }
+        // Último recurso: índice 0..n-1
         return idx;
       }
-      return null;
-    }
-
-    if (q.opciones && typeof q.opciones === "object") {
-      const entries = Object.entries(q.opciones);
-      const found = entries.find(([key, val]) => {
-        const lbl = val?.label ?? val?.txt ?? val?.text ?? key;
-        return lbl === opcion_txt;
-      });
-      if (found) {
-        const val = found[1];
-        const cand = val?.raw ?? val?.value ?? val?.score ?? val?.puntaje;
-        if (cand !== undefined && Number.isFinite(Number(cand))) return Number(cand);
+    } else if (q?.opciones && typeof q.opciones === "object") {
+      for (const [key, val] of Object.entries(q.opciones)) {
+        const lbl = norm(val?.label ?? val?.txt ?? val?.text ?? key);
+        if (lbl === t) {
+          const cand = val?.raw ?? val?.value ?? val?.score ?? val?.puntaje;
+          if (cand !== undefined && Number.isFinite(Number(cand))) return Number(cand);
+          return null;
+        }
       }
     }
+
     return null;
   }
 
@@ -342,7 +364,7 @@ export default function TestViewer() {
     savingRef.current = true;
     try {
       const opcion_txt = typeof opcionElegida === "string" ? opcionElegida : (opcionElegida?.label ?? String(opcionElegida));
-      const raw = q?.tipo === "likert" ? getRawFromOption(q, opcionElegida) : null;
+      const raw = getRawFromOption(q, opcionElegida); // <-- CORREGIDO: siempre calcular raw
       const payload = {
         caso_id: caseId,
         prueba_id: pruebaId,
@@ -371,6 +393,21 @@ export default function TestViewer() {
 
   const handleSignatureDone = async () => {
     try {
+      // 1) Calcular puntajes del intento
+      if (attemptId) {
+        const { data, error } = await supabase.rpc("calc_puntajes_por_intento", {
+          p_intento: attemptId,
+          p_grupo_norma: null,
+          p_normativa_version: null,
+        });
+        if (error) {
+          console.error("Error al calcular puntajes:", error);
+        } else {
+          console.log("Puntajes calculados:", data);
+        }
+      }
+
+      // 2) Marcar estado prueba/caso
       if (pruebaId && caseId) {
         const { error } = await supabase.rpc("actualizar_estado_prueba_y_caso", {
           p_caso_id: caseId,
