@@ -1,3 +1,4 @@
+// src/components/ModalResultados.jsx
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { inferirIA } from "../services/ia";
@@ -56,7 +57,7 @@ export default function ModalResultados({ open, onClose, caso }) {
 
         const { data: last, error: e2 } = await supabase
           .from("perfiles_caso")
-          .select("id, model_version, perfil_clinico, probabilidad, generated_at")
+          .select("id, model_version, perfil_clinico, probabilidad, generated_at, generated_by, insights")
           .eq("caso_id", caso.id)
           .order("generated_at", { ascending: false })
           .limit(1)
@@ -101,7 +102,18 @@ export default function ModalResultados({ open, onClose, caso }) {
     setPuntajes([]);
   }
 
-  // Armado de features del caso (con banderas)
+  // === Aliases para cuadrar con features_orden.json del modelo ===
+  const ALIAS = {
+    "Fp-r": "Fpsi-r",
+    "FBS-r": "FVS-r",
+    RCd: "CRd",
+    RC1: "CR1", RC2: "CR2", RC3: "CR3", RC4: "CR4",
+    RC6: "CR6", RC7: "CR7", RC8: "CR8", RC9: "CR9",
+    "AE-PI": "AE/PI",
+    "AC-PE": "AC/PE",
+  };
+
+  // Construye features del caso con prefijos y alias
   async function recolectarFeaturesCaso() {
     const { data: fin, error } = await supabase.rpc(
       "api_pruebas_finalizadas_por_caso",
@@ -120,7 +132,6 @@ export default function ModalResultados({ open, onClose, caso }) {
       tiene_MMPI: presentes.has("MMPI-2") ? 1 : 0,
     };
 
-
     for (const it of intentos) {
       const { data, error: e2 } = await supabase.rpc("api_puntajes_por_intento", {
         p_intento_id: it.intentoId,
@@ -128,36 +139,95 @@ export default function ModalResultados({ open, onClose, caso }) {
       });
       if (e2) throw e2;
 
+      const pref =
+        it.codigo === "PAI" ? "PAI_" :
+        it.codigo === "MCMI-IV" ? "MCMI_" :
+        it.codigo === "MMPI-2" ? "MMPI_" : "";
+
       for (const r of data || []) {
-        const code = r.escala_codigo;
-        const val = r.puntaje_convertido ?? r.puntaje_t ?? r.puntaje_bruto ?? null;
-        if (code && typeof val === "number" && Number.isFinite(val)) {
-          features[code] = Number(val);
+        const rawCode = String(r.escala_codigo || "").trim();
+        const fixed = ALIAS[rawCode] ?? rawCode;
+        const finalKey = pref ? (pref + fixed) : fixed;
+
+        const val =
+          typeof r.puntaje_convertido === "number" ? r.puntaje_convertido :
+          typeof r.puntaje_t === "number" ? r.puntaje_t :
+          typeof r.puntaje_bruto === "number" ? r.puntaje_bruto : null;
+
+        if (Number.isFinite(val)) {
+          features[finalKey] = Number(val);
         }
       }
     }
+
+    // ===== LOGS =====
+    const keys = Object.keys(features);
+    console.log("==== FEATURES ENVIADAS A IA ====");
+    console.log("Total de features:", keys.length);
+    console.log("Claves (orden alfabético):", [...keys].sort());
+    const sample = {};
+    for (const k of keys.slice(0, 10)) sample[k] = features[k];
+    console.log("Ejemplo de pares clave→valor:", sample);
+    console.log("JSON a enviar:", { explain: true, top_k: 5, debug: true, features });
+
     return features;
   }
 
-  // Generar y guardar
+  // Generar y guardar (agrega generated_by + insights con descripcion/guia_long)
   async function generarPerfilCasoIA() {
     try {
       setGenerando(true);
       const features = await recolectarFeaturesCaso();
-      const resp = await inferirIA(features, { explain: true, topK: 5, debug: true, log: true });
+
+      const resp = await inferirIA(features, {
+        explain: true, topK: 5, debug: true, log: true,
+      });
+
+      // Logs de depuración del backend
+      if (resp?.explicacion?.debug) {
+        const dbg = resp.explicacion.debug;
+        console.log("DEBUG.missing_numeric:", dbg.missing_numeric);
+        console.log("DEBUG.unknown_inputs:", dbg.unknown_inputs);
+        console.log("DEBUG.used_numeric:", dbg.used_numeric);
+      }
+
+      // Usuario actual para generated_by
+      const { data: udata, error: eAuth } = await supabase.auth.getUser();
+      if (eAuth) throw eAuth;
+      const user = udata?.user;
+      if (!user?.id) throw new Error("No hay sesión activa. Inicia sesión para generar el perfil IA.");
+
+      // Armar insights (jsonb NOT NULL en tu tabla)
+      const insights = {
+        metodo: resp.explicacion?.metodo ?? null,
+        clase_objetivo: resp.explicacion?.clase_objetivo ?? resp.perfil_clinico,
+        descripcion: resp.descripcion ?? null,           // << nuevo
+        guia_long: resp.guia?.long ?? null,              // << nuevo
+        top_features: (resp.explicacion?.top_features ?? []).map(tf => ({
+          feature: tf.feature, valor: tf.valor, aporte: tf.aporte, sentido: tf.sentido
+        })),
+        // Metadatos mínimos útiles:
+        features_count: Object.keys(features).length,
+        probabilidad: resp.probabilidad,
+        version: resp.model_version,
+      };
 
       const { data: ins, error: eIns } = await supabase
         .from("perfiles_caso")
         .insert([{
           caso_id: caso.id,
+          generated_by: user.id,       // requerido por RLS/tabla
           model_version: resp.model_version,
           perfil_clinico: resp.perfil_clinico,
           probabilidad: resp.probabilidad,
+          insights,                    // jsonb NOT NULL
+          // generated_at: new Date().toISOString(), // si no tienes DEFAULT now()
         }])
         .select()
         .single();
 
-      if (!eIns) setPerfilGuardado(ins || null);
+      if (eIns) throw eIns;
+      setPerfilGuardado(ins || null);
       setPerfilIA(resp);
     } catch (e) {
       console.error("generarPerfilCasoIA", e);
@@ -172,7 +242,17 @@ export default function ModalResultados({ open, onClose, caso }) {
     try {
       setGenerando(true);
       const features = await recolectarFeaturesCaso();
-      const resp = await inferirIA(features, { explain: true, topK: 5, debug: true, log: true });
+      const resp = await inferirIA(features, {
+        explain: true, topK: 5, debug: true, log: true,
+      });
+
+      if (resp?.explicacion?.debug) {
+        const dbg = resp.explicacion.debug;
+        console.log("DEBUG.missing_numeric:", dbg.missing_numeric);
+        console.log("DEBUG.unknown_inputs:", dbg.unknown_inputs);
+        console.log("DEBUG.used_numeric:", dbg.used_numeric);
+      }
+
       setPerfilIA(resp);
     } catch (e) {
       console.error("visualizarPerfilGuardado", e);
@@ -239,6 +319,7 @@ export default function ModalResultados({ open, onClose, caso }) {
               className={`btn-primary mr-btn ${generando ? "mr-btn--disabled" : ""}`}
               onClick={generarPerfilCasoIA}
               disabled={generando}
+              title="Llama a la IA y guarda el resultado"
             >
               {generando ? "Generando…" : "Generar perfil IA del caso"}
             </button>
@@ -247,6 +328,7 @@ export default function ModalResultados({ open, onClose, caso }) {
               className={`btn-primary mr-btn ${generando ? "mr-btn--disabled" : ""}`}
               onClick={visualizarPerfilGuardado}
               disabled={generando}
+              title="Solo vuelve a inferir y mostrar (no inserta en BD)"
             >
               {generando ? "Abriendo…" : "Visualizar perfil IA"}
             </button>
@@ -303,7 +385,7 @@ export default function ModalResultados({ open, onClose, caso }) {
           </div>
         )}
 
-        {/* ===== Perfil IA (vertical: chip arriba, tabla debajo) ===== */}
+        {/* ===== Perfil IA (vertical: chip arriba, descripción, tabla debajo) ===== */}
         {perfilIA && (
           <div
             className="modal-overlay nested"
@@ -325,7 +407,28 @@ export default function ModalResultados({ open, onClose, caso }) {
                   </div>
                 </div>
 
-                <h5 className="perfil-subtitle">Escalas que más aportaron</h5>
+                {/* Descripción corta + explicación larga */}
+                {(perfilIA.descripcion || perfilIA.guia?.long) && (
+                  <div style={{ marginTop: 8 }}>
+                    {perfilIA.descripcion && (
+                      <p className="perfil-desc" style={{ color: "#6b7280", marginBottom: 6 }}>
+                        {perfilIA.descripcion}
+                      </p>
+                    )}
+                    {perfilIA.guia?.long && (
+                      <details className="perfil-long">
+                        <summary style={{ cursor: "pointer", color: "#2563eb" }}>
+                          Ver explicación
+                        </summary>
+                        <p style={{ marginTop: 6, color: "#374151" }}>
+                          {perfilIA.guia.long}
+                        </p>
+                      </details>
+                    )}
+                  </div>
+                )}
+
+                <h5 className="perfil-subtitle" style={{ marginTop: 12 }}>Escalas que más aportaron</h5>
 
                 {(() => {
                   const top = calcularPorcentajes(perfilIA.explicacion?.top_features || []);

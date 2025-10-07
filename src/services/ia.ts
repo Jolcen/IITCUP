@@ -21,35 +21,57 @@ export type InferResponse = {
   model_version: string;
   perfil_clinico: string;
   probabilidad: number;
+
+  /** NUEVO: texto corto con significado del perfil */
+  descripcion?: string;
+
+  /** NUEVO: campo con explicación larga */
+  guia?: {
+    long?: string;
+  };
+
   explicacion?: {
     metodo: string;
     clase_objetivo: string;
     top_features: TopFeature[];
-    // El backend la envía solo si pediste debug: true
-    debug?: IaDebug;
+    debug?: IaDebug; // solo si debug=true
   };
 };
 
-// Usa la URL de .env y cae a localhost si no está definida
-const IA_BASE =
-  (import.meta.env.VITE_IA_BASE_URL as string) ?? "http://127.0.0.1:8000";
+// 1) Base URL desde .env con fallback local, y sin barras finales
+export const IA_BASE = (
+  (import.meta as any)?.env?.VITE_IA_BASE_URL ?? "http://127.0.0.1:8000"
+)
+  .toString()
+  .replace(/\/+$/, "");
+
+// 2) Exponer URL para probar desde consola del navegador
+//    -> en Console puedes hacer:  fetch(__IA_BASE + "/health").then(r=>r.text()).then(console.log)
+;(window as any).__IA_BASE = IA_BASE;
 
 type InferOpts = {
   explain?: boolean;
   topK?: number;
-  debug?: boolean; // para que el backend devuelva vector_raw_dict, alias_map, etc.
-  log?: boolean;   // loggea payload y respuesta en consola
+  debug?: boolean;   // para que el backend devuelva vectores/mapeos
+  log?: boolean;     // loggea payload y respuesta en consola
+  timeoutMs?: number; // default 20s
 };
 
 /**
  * Llama a POST /inferir del servicio de IA.
- * - `features`: diccionario escala->valor (puede usar códigos de tu BD: SOM, 4A, F-r, etc.)
- * - `opts.debug`: si true, el backend devuelve vectores y mapeos para auditar.
- * - `opts.log`: si true, imprime en consola el payload y la respuesta.
+ * - `features`: diccionario escala->valor (usa las claves que espera el modelo)
+ * - `opts.debug`: si true, el backend devuelve vector_raw_dict, alias_map, etc.
+ * - `opts.log`: si true, imprime payload y respuesta.
  */
 export async function inferirIA(
   features: Record<string, number>,
-  opts: InferOpts = { explain: true, topK: 5, debug: false, log: false }
+  opts: InferOpts = {
+    explain: true,
+    topK: 5,
+    debug: false,
+    log: false,
+    timeoutMs: 20000,
+  }
 ): Promise<InferResponse> {
   const payload = {
     features,
@@ -59,37 +81,76 @@ export async function inferirIA(
   };
 
   if (opts.log) {
+    console.log("IA BASE ->", IA_BASE);
     console.log("IA payload ->", payload);
   }
 
-  const res = await fetch(`${IA_BASE}/inferir`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    credentials: "include", // por si habilitas CORS con credenciales
-  });
+  // Timeout y mejor manejo de errores
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 20000);
 
-  if (!res.ok) {
+  try {
+    const res = await fetch(`${IA_BASE}/inferir`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      // Durante pruebas evita credenciales (CORS estricto suele bloquear).
+      // Si luego necesitas sesión/cookies, cambia a "include" y ajusta CORS en el backend.
+      credentials: "omit",
+      signal: ctrl.signal,
+      cache: "no-store",
+    });
+
     const text = await res.text();
-    if (opts.log) console.error("IA error ->", res.status, text);
-    throw new Error(`IA /inferir ${res.status}: ${text}`);
+
+    if (!res.ok) {
+      throw new Error(`IA /inferir ${res.status}: ${text || res.statusText}`);
+    }
+
+    let data: InferResponse;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(
+        `IA /inferir 200 pero JSON inválido: ${text?.slice(0, 200)}...`
+      );
+    }
+
+    if (!data?.perfil_clinico) {
+      throw new Error('Respuesta IA inválida: falta "perfil_clinico".');
+    }
+
+    if (opts.log) {
+      console.log("IA response ->", data);
+      // si hay debug desde el backend
+      if ((data as any)?.explicacion?.debug) {
+        const dbg = (data as any).explicacion.debug as IaDebug;
+        console.log("DEBUG.missing_numeric:", dbg.missing_numeric);
+        console.log("DEBUG.unknown_inputs:", dbg.unknown_inputs);
+        console.log("DEBUG.used_numeric:", dbg.used_numeric);
+      }
+    }
+
+    return data;
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      err.message = `IA timeout (${opts.timeoutMs ?? 20000}ms).`;
+    }
+    console.error("inferirIA error:", err);
+    throw err;
+  } finally {
+    clearTimeout(to);
   }
-
-  const json = (await res.json()) as InferResponse;
-
-  if (opts.log) {
-    console.log("IA response ->", json);
-  }
-
-  return json;
 }
 
-/* 
-  Atajos de uso (si te gusta la vieja firma “inferirIA(features, true, 5, true)”):
-
-  export async function inferirIADebug(
-    features: Record<string, number>,
-  ): Promise<InferResponse> {
-    return inferirIA(features, { explain: true, topK: 5, debug: true, log: true });
-  }
-*/
+/** Atajo para debug detallado */
+export async function inferirIADebug(
+  features: Record<string, number>
+): Promise<InferResponse> {
+  return inferirIA(features, {
+    explain: true,
+    topK: 5,
+    debug: true,
+    log: true,
+  });
+}

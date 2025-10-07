@@ -1,0 +1,38 @@
+{
+  "Antisocial": {
+    "short": "Patrón compatible con impulsividad, baja internalización de normas y mayor probabilidad de conflictos conductuales.",
+    "long": "El perfil sugiere tendencia a minimizar reglas, búsqueda de sensaciones y posibles conductas de riesgo. Puede acompañarse de irritabilidad o agresividad instrumental. No implica diagnóstico por sí mismo: integrar con historia evolutiva, contexto legal/laboral y presencia de consumo de sustancias. Señales de atención: conductas violentas, estafas/reiteración de transgresiones, baja empatía. Intervenciones útiles: psicoeducación en consecuencias, límites claros, entrenamiento en habilidades y planes conductuales con refuerzo."
+  },
+  "Ansiedad": {
+    "short": "Elevada activación fisiológica/cognitiva, preocupación y evitación.",
+    "long": "Perfil asociado a tensión somática, inquietud, hipervigilancia y sesgo atencional a amenaza. Explorar curso temporal, disparadores, interferencia funcional y evitaciones. Realizar diagnóstico diferencial con condiciones médicas y sustancias. Señales de atención: insomnio persistente, crisis de pánico, deterioro académico/laboral. Sugerencias: psicoeducación, respiración/relajación, exposición gradual, reestructuración cognitiva y entrenamiento en habilidades de regulación."
+  },
+  "Bipolar": {
+    "short": "Indicadores de variabilidad afectiva marcada con periodos de aumento de energía/irritabilidad alternando con abatimiento.",
+    "long": "El patrón puede corresponder a labilidad del estado de ánimo, impulsividad y cambios en ritmos de sueño/actividad. Requiere evaluación clínica de episodios (duración, impacto, antecedentes familiares) y diagnóstico diferencial con ciclotimia, uso de sustancias y rasgos límite. Señales de atención: ideas de grandiosidad, disminución marcada del sueño sin fatiga, conductas de alto riesgo. Sugerencias: psicoeducación, monitoreo de estados de ánimo, higiene del sueño y coordinación con psiquiatría si hay sospecha de episodio afectivo."
+  },
+  "Depresivo": {
+    "short": "Ánimo bajo, anhedonia y fatiga, con posible sesgo negativo en autoevaluación.",
+    "long": "El perfil sugiere disminución del interés/placer, retraimiento y rumiación. Valorar gravedad, inicio y factores precipitantes, así como ideación suicida o autolesiones. Considerar comorbilidad ansiosa y consumo de sustancias. Señales de atención: desesperanza intensa, planificación suicida, pérdida ponderal marcada. Intervenciones: activación conductual, reestructuración cognitiva, fortalecimiento de apoyos y derivación urgente si hay riesgo."
+  },
+  "Esquizofrenia": {
+    "short": "Patrón compatible con alteraciones del pensamiento/percepción y retraimiento social.",
+    "long": "Podría reflejar experiencias inusuales, desorganización o aplanamiento afectivo. Es un indicador orientativo; requiere evaluación clínica exhaustiva y diagnóstico diferencial (consumo de sustancias, condiciones neurológicas, trastornos afectivos con síntomas psicóticos). Señales de atención: ideas delirantes estructuradas, alucinaciones persistentes, marcada desorganización conductual. Sugerencias: evaluación psiquiátrica, psicoeducación familiar y adherencia a tratamiento si corresponde."
+  },
+  "Límite": {
+    "short": "Rasgos de inestabilidad afectiva e interpersonal, con impulsividad y sensibilidad al abandono.",
+    "long": "Frecuente labilidad emocional, dificultades en identidad y posibles conductas de auto-daño como regulación afectiva. No constituye diagnóstico por sí mismo; integrar con historia de traumas, patrón relacional y funcionalidad. Señales de atención: autolesiones, conductas suicidas, abuso de sustancias. Intervenciones con evidencia: terapia dialéctico-conductual (DBT), validación emocional, entrenamiento en habilidades y planes de seguridad."
+  },
+  "No clínico": {
+    "short": "Puntajes sin indicios clínicos relevantes en las escalas analizadas.",
+    "long": "El patrón global se encuentra dentro de rangos no clínicos. Interpretar siempre en conjunto con la entrevista, contexto y motivo de consulta. Mantener seguimiento si aparecen estresores o síntomas emergentes."
+  },
+  "Paranoide": {
+    "short": "Aumento de sospecha y desconfianza interpersonal; estilo vigilante ante posibles daños o engaños.",
+    "long": "Puede expresarse como hipersensibilidad a críticas, rumiación de agravios y rigidez interpretativa. Diferenciar de hipervigilancia adaptativa por contextos de riesgo real, así como de síntomas psicóticos. Señales de atención: ideas sobrevaloradas persistentes con impacto conductual, conflictos interpersonales graves. Intervenciones: psicoeducación, estrategias de afrontamiento, entrenamiento en mentalización y comunicación asertiva."
+  },
+  "Uso de Sustancias": {
+    "short": "Indicios de consumo con posible impacto en funcionamiento, estado de ánimo o conducta.",
+    "long": "Explorar sustancia(s), frecuencia, cantidades, abstinencia y control percibido. Evaluar relación con síntomas de ansiedad/depresión y riesgo asociado (manejo, laboral, violencia). Señales de atención: consumo diario, intentos fallidos de control, abstinencia fisiológica, conductas de riesgo. Sugerencias: entrevista motivacional, reducción de daños, red de apoyo y derivación a tratamiento especializado si procede."
+  }
+}
