@@ -273,11 +273,11 @@ export default function TestViewer() {
         // 4) Cargar ítems
         const { data, error } = await supabase
           .from("items_prueba")
-          .select("id, enunciado, opciones, inverso, orden, activo, tipo")
+          .select("id, enunciado, opciones, inverso, orden, tipo") // ← sin 'activo'
           .eq("prueba_id", pid)
-          .eq("activo", true)
           .order("orden", { ascending: true })
           .limit(2000);
+
         if (error) throw error;
         if (!data?.length) throw new Error("No hay ítems para esta prueba.");
 
@@ -289,8 +289,8 @@ export default function TestViewer() {
           orden: r.orden ?? i + 1,
           tipo: r.tipo || "opcion",
         }));
-        if (!alive) return;
         setItems(mapped);
+
 
         // 5) Crear / reutilizar intento
         const atid = await ensureAttempt(pid);
@@ -397,8 +397,6 @@ export default function TestViewer() {
       if (attemptId) {
         const { data, error } = await supabase.rpc("calc_puntajes_por_intento", {
           p_intento: attemptId,
-          p_grupo_norma: null,
-          p_normativa_version: null,
         });
         if (error) {
           console.error("Error al calcular puntajes:", error);
