@@ -8,6 +8,9 @@ export const Login = ({ setIsAuthenticated }) => {
   const [clave, setClave] = useState('');
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState('');
+  const [needVerify, setNeedVerify] = useState(false);
+  const [resendOk, setResendOk] = useState('');
+  const [resendLoading, setResendLoading] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -20,36 +23,81 @@ export const Login = ({ setIsAuthenticated }) => {
     })();
   }, [navigate, setIsAuthenticated]);
 
+  const handleResend = async () => {
+    try {
+      setResendLoading(true);
+      setResendOk('');
+      // reenvía correo de verificación
+      const { error: e } = await supabase.auth.resend({
+        type: 'signup',
+        email: email.trim(),
+        options: { emailRedirectTo: `${window.location.origin}/login` },
+      });
+      if (e) throw e;
+      setResendOk('Te enviamos un nuevo correo de verificación.');
+    } catch (e) {
+      setError(e.message || 'No se pudo reenviar el correo de verificación');
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
+    setNeedVerify(false);
+    setResendOk('');
     setCargando(true);
 
     try {
-      // 1) Login en Supabase Auth
+      // 1) login en Supabase Auth
       const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password: clave,
       });
-      if (authError) throw new Error(authError.message || 'No se pudo iniciar sesión');
+      if (authError) {
+        const msg = (authError.message || '').toLowerCase();
+        if (msg.includes('confirm') || msg.includes('verified') || msg.includes('verification')) {
+          setNeedVerify(true);
+          throw new Error('Aún no verificaste tu correo. Revisa tu bandeja o reenvía el correo.');
+        }
+        throw new Error('Correo o contraseña incorrectos.');
+      }
 
       const uid = data?.user?.id;
       if (!uid) throw new Error('No se obtuvo el usuario de la sesión.');
 
-      // 2) Verificar perfil en app_users
+      // 2) aseguramos estado (verificacion -> disponible) si ya confirmó
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      if (token) {
+        await supabase.functions.invoke('auth-after-signin', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+
+      // 3) traer perfil/estado de app_users
       const { data: perfil, error: perfilError } = await supabase
         .from('app_users')
-        .select('id, nombre, email, rol')
+        .select('id, nombre, email, rol, estado')
         .eq('id', uid)
         .maybeSingle();
 
       if (perfilError) throw new Error(perfilError.message);
       if (!perfil) {
-        setError('Tu cuenta existe en Auth pero no está habilitada en el sistema. Contacta al administrador.');
-        return;
+        throw new Error('Tu cuenta existe en Auth pero no está habilitada en el sistema. Contacta al administrador.');
       }
 
-      // 3) Marcar autenticado y redirigir
+      // 4) bloquear acceso si no está "disponible"
+      if (perfil.estado !== 'disponible') {
+        if (perfil.estado === 'verificacion') {
+          setNeedVerify(true);
+          throw new Error('Tu correo todavía no está verificado. Verifica para continuar.');
+        }
+        throw new Error(`Usuario inválido (estado: ${perfil.estado}).`);
+      }
+
+      // 5) OK: marcaremos autenticado y redirigimos
       setIsAuthenticated?.(true);
       localStorage.setItem('isAuthenticated', 'true');
       localStorage.setItem('perfil', JSON.stringify(perfil));
@@ -105,7 +153,21 @@ export const Login = ({ setIsAuthenticated }) => {
             {cargando ? 'Ingresando…' : 'Entrar'}
           </button>
 
-          {error && <p style={{ color: 'crimson', fontSize: 12, marginTop: 8 }}>{error}</p>}
+          {error && <p className="login-error">{error}</p>}
+
+          {needVerify && (
+            <div className="login-hint">
+              <button
+                type="button"
+                className="login-link"
+                onClick={handleResend}
+                disabled={resendLoading}
+              >
+                {resendLoading ? 'Reenviando…' : 'Reenviar correo de verificación'}
+              </button>
+              {resendOk && <div className="login-ok">{resendOk}</div>}
+            </div>
+          )}
         </form>
       </div>
     </div>

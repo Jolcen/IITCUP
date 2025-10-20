@@ -1,4 +1,4 @@
-// Deno Edge Function: crear usuario (Auth Admin) + fila en app_users + log
+// Deno Edge Function: crear/actualizar usuario + fila en app_users (idempotente) + enviar invitación
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -8,79 +8,89 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
-const ALLOWED_ROLES = new Set(["administrador","encargado","operador","secretario"]);
+// 👇 Siempre devolver JSON
+const JSON_HEADERS = { ...corsHeaders, "Content-Type": "application/json" };
+const j = (obj: unknown, status = 200) =>
+  new Response(JSON.stringify(obj), { status, headers: JSON_HEADERS });
+
+const ALLOWED_ROLES = new Set(["administrador", "encargado", "operador", "secretario"]);
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response("ok", { headers: JSON_HEADERS });
   }
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-    // Cliente admin (service role) — ignora RLS
     const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-    // 1) Validar quién llama (leer JWT del header)
+    // 1) validar JWT del llamante
     const jwt = req.headers.get("Authorization")?.replace("Bearer ", "")?.trim();
-    if (!jwt) {
-      return new Response(JSON.stringify({ error: "Falta Authorization Bearer <token>" }), { status: 401, headers: corsHeaders });
-    }
+    if (!jwt) return j({ error: "Falta Authorization Bearer <token>" }, 401);
 
-    // 2) Preguntar a Auth por el usuario del token
     const { data: authUserData, error: getUserErr } = await admin.auth.getUser(jwt);
     if (getUserErr || !authUserData?.user?.id) {
-      return new Response(JSON.stringify({ error: "No session", detail: getUserErr?.message }), { status: 401, headers: corsHeaders });
+      return j({ error: "No session", detail: getUserErr?.message }, 401);
     }
     const meId = authUserData.user.id;
 
-    // 3) Verificar que sea administrador
+    // 2) verificar que sea administrador
     const { data: meRow, error: meErr } = await admin
       .from("app_users")
       .select("rol")
       .eq("id", meId)
       .single();
+    if (meErr) return j({ error: "No se pudo verificar rol", detail: meErr.message }, 400);
+    if (meRow?.rol !== "administrador") return j({ error: "Solo administrador" }, 403);
 
-    if (meErr) {
-      return new Response(JSON.stringify({ error: "No se pudo verificar rol", detail: meErr.message }), { status: 400, headers: corsHeaders });
-    }
-    if (meRow?.rol !== "administrador") {
-      return new Response(JSON.stringify({ error: "Solo administrador" }), { status: 403, headers: corsHeaders });
-    }
-
-    // 4) Body
+    // 3) body
     const body = await req.json();
-    const { email, password, nombre, rol, estado = "disponible", perfil = {} } = body ?? {};
+    const { email, password, nombre, rol, perfil = {}, redirectTo } = body ?? {};
     if (!email || !password || !nombre || !rol) {
-      return new Response(JSON.stringify({ error: "Faltan campos (email, password, nombre, rol)" }), { status: 400, headers: corsHeaders });
+      return j({ error: "Faltan campos (email, password, nombre, rol)" }, 400);
     }
-    if (!ALLOWED_ROLES.has(String(rol))) {
-      return new Response(JSON.stringify({ error: "Rol no válido" }), { status: 400, headers: corsHeaders });
+    if (!ALLOWED_ROLES.has(String(rol))) return j({ error: "Rol no válido" }, 400);
+
+    // 4) invitar (email de verificación)
+    const redir = redirectTo || Deno.env.get("SITE_URL") || "http://localhost:5173/login";
+    const { data: invited, error: invErr } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo: redir });
+    if (invErr) return j({ error: "No se pudo invitar al usuario", detail: invErr.message }, 400);
+
+    const authUser = invited.user;
+    if (!authUser?.id) return j({ error: "Auth no devolvió id de usuario" }, 500);
+
+    // 5) fijar/actualizar contraseña
+    const { error: setPassErr } = await admin.auth.admin.updateUserById(authUser.id, { password });
+    if (setPassErr) return j({ error: "No se pudo fijar la contraseña", detail: setPassErr.message }, 400);
+
+    // 6) upsert en app_users (idempotente)
+    //   - si existe con otro id el mismo email, devolvemos conflicto legible
+    const { data: emailRow, error: emailQueryErr } = await admin
+      .from("app_users")
+      .select("id")
+      .eq("email", email)
+      .maybeSingle();
+    if (emailQueryErr) return j({ error: "No se pudo verificar email existente", detail: emailQueryErr.message }, 400);
+    if (emailRow && emailRow.id !== authUser.id) {
+      return j({ error: "El email ya está asignado a otro usuario en el sistema" }, 409);
     }
 
-    // 5) Crear en Auth
-    const { data: created, error: eCreate } = await admin.auth.admin.createUser({
+    const insertPayload = {
+      id: authUser.id,
       email,
-      password,
-      email_confirm: true,
-    });
-    if (eCreate) {
-      const msg = eCreate.message ?? String(eCreate);
-      const status = /already/i.test(msg) ? 409 : 400;
-      return new Response(JSON.stringify({ error: "No se pudo crear en Auth", detail: msg }), { status, headers: corsHeaders });
-    }
-    const authUser = created!.user;
+      nombre,
+      rol,
+      estado: "verificacion", // siempre forzamos verificación al crear/recuperar
+      deleted_at: null,       // “des-eliminar” si estaba en soft-delete
+    };
 
-    // 6) Insertar en app_users
-    const insertPayload = { id: authUser.id, email, nombre, rol, estado };
-    const { error: eInsert } = await admin.from("app_users").insert(insertPayload);
-    if (eInsert) {
-      await admin.auth.admin.deleteUser(authUser.id); // rollback
-      return new Response(JSON.stringify({ error: "No se pudo insertar en app_users", detail: eInsert.message }), { status: 400, headers: corsHeaders });
-    }
+    const { error: upsertErr } = await admin
+      .from("app_users")
+      .upsert(insertPayload, { onConflict: "id" });
+    if (upsertErr) return j({ error: "No se pudo crear/actualizar en app_users", detail: upsertErr.message }, 400);
 
-    // 7) Upsert perfil (si viene)
+    // 7) upsert perfil (si llega)
     if (perfil && typeof perfil === "object") {
       const { error: eProf } = await admin
         .from("staff_profiles")
@@ -96,11 +106,9 @@ serve(async (req) => {
           fecha_graduacion: perfil.fecha_graduacion ?? null,
           nivel: perfil.nivel ?? null,
           turno: perfil.turno ?? null,
-          disponibilidad: perfil.disponibilidad ?? null,
           avatar_url: perfil.avatar_url ?? null,
         }, { onConflict: "id" });
       if (eProf) {
-        // No hacemos rollback de Auth/app_users; registramos en logs que el perfil falló
         await admin.from("logs").insert({
           usuario_id: meId,
           accion: "CREATE_PROFILE_FAILED",
@@ -113,26 +121,23 @@ serve(async (req) => {
       }
     }
 
-    // 8) Log
+    // 8) log
     const ip = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "";
     const ua = req.headers.get("user-agent") || "";
     await admin.from("logs").insert({
       usuario_id: meId,
-      accion: "CREATE",
+      accion: "CREATE_OR_UPSERT",
       entidad: "app_users",
       entidad_id: authUser.id,
       fecha: new Date().toISOString(),
-      detalle: "Alta de usuario por administrador",
+      detalle: "Alta/recuperación de usuario por administrador",
       data: { insertPayload, perfil },
       ip,
       user_agent: ua,
     });
 
-    return new Response(JSON.stringify({ ok: true, id: authUser.id }), { status: 200, headers: corsHeaders });
+    return j({ ok: true, id: authUser.id }, 200);
   } catch (err) {
-    return new Response(JSON.stringify({ error: "Excepción no controlada", detail: String(err?.message ?? err) }), {
-      status: 500,
-      headers: corsHeaders,
-    });
+    return j({ error: "Excepción no controlada", detail: String(err?.message ?? err) }, 500);
   }
 });

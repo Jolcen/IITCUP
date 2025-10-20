@@ -1,3 +1,4 @@
+// App.jsx
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Suspense } from "react";
 import { Login } from "./pages/Login";
@@ -12,13 +13,14 @@ import TestViewer from "./pages/TestViewer";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import AdminRoute from "./routes/AdminRoute";
 import Forbidden from "./pages/Forbidden";
-import NoAuthRoute from "./routes/NoAuthRoute"; 
+import NoAuthRoute from "./routes/NoAuthRoute";
 import Pacientes from "./pages/Pacientes";
 import Resultados from "./pages/Resultados";
+import Welcome from "./pages/Welcome";
 
 export default function App() {
   return (
-    <BrowserRouter basename={import.meta.env.BASE_URL /* útil para GH Pages */}>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <Suspense fallback={<div style={{ padding: 24 }}>Cargando…</div>}>
         <Routes>
           {/* Pública SOLO si NO hay sesión */}
@@ -40,7 +42,12 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route index element={<Dashboard />} />
+            {/* "/" ahora es la Bienvenida */}
+            <Route index element={<Welcome />} />
+
+            {/* "Inicio" (tu dashboard) ahora vive en /inicio */}
+            <Route path="inicio" element={<Dashboard />} />
+
             <Route path="evaluaciones" element={<Evaluaciones />} />
             <Route path="historial" element={<Historial />} />
             <Route path="resultados" element={<Resultados />} />

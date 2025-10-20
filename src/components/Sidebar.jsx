@@ -117,7 +117,8 @@ export default function Sidebar() {
         <div className="menu-section">
           <p className="section-title">MENÚ PRINCIPAL</p>
           <ul>
-            <NavLink to="/">
+            {/* ANTES: <NavLink to="/"> */}
+            <NavLink to="/inicio">
               <li>
                 <FaHome /> Inicio
               </li>

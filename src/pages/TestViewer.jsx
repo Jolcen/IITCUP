@@ -8,10 +8,11 @@ import "../styles/TestViewer.css";
 const SLUG2CODE = { pai: "PAI", "mcmi-iv": "MCMI-IV", "mmpi-2": "MMPI-2", custom: "CUSTOM" };
 
 export default function TestViewer() {
-  const { testId } = useParams(); // viene como slug (pai, mmpi-2, etc.)
+  const { testId } = useParams();
   const [sp] = useSearchParams();
   const caseId = sp.get("case") || null;
   const pacienteNombre = sp.get("nombre") || "";
+  const debugAudit = sp.get("debug") === "1";
   const navigate = useNavigate();
 
   const [items, setItems] = useState([]);
@@ -117,7 +118,18 @@ export default function TestViewer() {
     return [];
   }
 
-  // === CORREGIDO: obtiene un número 'raw' para cualquier tipo de opción ===
+  // === Opciones por tipo (fallbacks seguros)
+  function optionsForQuestion(q) {
+    const hasCustom = Array.isArray(q?.opciones) && q.opciones.length > 0;
+    if (hasCustom) return q.opciones;
+    const t = (q?.tipo || "").toLowerCase();
+    if (["boolean","vf","tf","mmpi","mcmi"].some(s => t.includes(s))) {
+      return ["Verdadero", "Falso"];
+    }
+    return ["Nada", "Poco", "Algo", "Mucho"]; // PAI/Likert
+  }
+
+  // === Obtiene un número 'raw' para cualquier tipo de opción
   function getRawFromOption(q, opcionElegida) {
     const label = typeof opcionElegida === "string"
       ? opcionElegida
@@ -130,7 +142,7 @@ export default function TestViewer() {
 
     const t = norm(label);
 
-    // Booleanos típicos (MMPI-2 / MCMI-IV)
+    // Booleanos (MMPI-2 / MCMI-IV)
     if (t === "verdadero" || t === "true" || t === "si" || t === "sí") return 1;
     if (t === "falso" || t === "false" || t === "no") return 0;
 
@@ -140,7 +152,7 @@ export default function TestViewer() {
     if (t === "algo")  return 2;
     if (t === "mucho") return 3;
 
-    // Si hay estructura con valores numéricos, úsalos
+    // Estructuras con valor numérico
     if (Array.isArray(q?.opciones)) {
       const idx = q.opciones.findIndex((o) => {
         const lbl = typeof o === "string" ? o : (o?.label ?? o?.txt ?? o?.text ?? "");
@@ -152,8 +164,7 @@ export default function TestViewer() {
           const cand = o.raw ?? o.value ?? o.score ?? o.puntaje;
           if (cand !== undefined && Number.isFinite(Number(cand))) return Number(cand);
         }
-        // Último recurso: índice 0..n-1
-        return idx;
+        return idx; // fallback por índice
       }
     } else if (q?.opciones && typeof q.opciones === "object") {
       for (const [key, val] of Object.entries(q.opciones)) {
@@ -169,13 +180,12 @@ export default function TestViewer() {
     return null;
   }
 
-  // ===== ensureAttempt: reutiliza si existe cualquiera; crea si no hay ninguno
+  // ===== ensureAttempt: reutiliza si existe; crea si no hay
   async function ensureAttempt(pid) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Sin sesión.");
     if (!caseId) throw new Error("Falta caseId.");
 
-    // 1) ¿Existe algún intento para este caso+prueba?
     const { data: anyTry, error: e0 } = await supabase
       .from("intentos_prueba")
       .select("id, estado, terminado_en")
@@ -192,7 +202,6 @@ export default function TestViewer() {
       return it.id;
     }
 
-    // 2) No existe: crear
     const { data: creado, error: e2 } = await supabase
       .from("intentos_prueba")
       .insert({ caso_id: caseId, prueba_id: pid })
@@ -213,7 +222,7 @@ export default function TestViewer() {
         setLoading(true);
         setErr("");
 
-        // 1) Resolver la prueba: slug -> id; si no hay slug, intentar por codigo
+        // 1) Resolver prueba
         let pid = null;
         {
           const bySlug = await supabase
@@ -241,7 +250,7 @@ export default function TestViewer() {
         if (!alive) return;
         setPruebaId(pid);
 
-        // 2) Verificar que la prueba esté asignada al caso
+        // 2) Verificar que esté asignada
         if (caseId) {
           const { data: asignada, error: eAsign } = await supabase
             .from("casos_pruebas")
@@ -255,7 +264,7 @@ export default function TestViewer() {
             return;
           }
 
-          // 3) Si ya hay intento evaluado/terminado, bloquear
+          // 3) Bloquear si ya está evaluada/terminada
           const { data: comp, error: eComp } = await supabase
             .from("intentos_prueba")
             .select("id, estado, terminado_en")
@@ -273,7 +282,7 @@ export default function TestViewer() {
         // 4) Cargar ítems
         const { data, error } = await supabase
           .from("items_prueba")
-          .select("id, enunciado, opciones, inverso, orden, tipo") // ← sin 'activo'
+          .select("id, enunciado, opciones, inverso, orden, tipo")
           .eq("prueba_id", pid)
           .order("orden", { ascending: true })
           .limit(2000);
@@ -290,7 +299,6 @@ export default function TestViewer() {
           tipo: r.tipo || "opcion",
         }));
         setItems(mapped);
-
 
         // 5) Crear / reutilizar intento
         const atid = await ensureAttempt(pid);
@@ -364,7 +372,8 @@ export default function TestViewer() {
     savingRef.current = true;
     try {
       const opcion_txt = typeof opcionElegida === "string" ? opcionElegida : (opcionElegida?.label ?? String(opcionElegida));
-      const raw = getRawFromOption(q, opcionElegida); // <-- CORREGIDO: siempre calcular raw
+      const raw = getRawFromOption(q, opcionElegida);
+
       const payload = {
         caso_id: caseId,
         prueba_id: pruebaId,
@@ -373,10 +382,15 @@ export default function TestViewer() {
         invertido: q.inverso ?? false,
         valor: { opcion_txt, raw },
       };
-      const { error } = await supabase
+
+      // Sin índice único: merge manual (delete → insert)
+      await supabase
         .from("respuestas")
-        .upsert(payload, { onConflict: "caso_id,prueba_id,item_id", ignoreDuplicates: false });
-      if (error) console.error("Error guardando respuesta:", error);
+        .delete()
+        .match({ intento_id: attemptId, item_id: q.id });
+
+      const { error: insErr } = await supabase.from("respuestas").insert(payload);
+      if (insErr) console.error("Error guardando respuesta:", insErr);
     } catch (e) {
       console.error("Excepción guardando respuesta:", e);
     } finally {
@@ -395,11 +409,33 @@ export default function TestViewer() {
     try {
       // 1) Calcular puntajes del intento
       if (attemptId) {
-        const { data, error } = await supabase.rpc("calc_puntajes_por_intento", {
-          p_intento: attemptId,
-        });
-        if (error) {
-          console.error("Error al calcular puntajes:", error);
+        const { error } = await supabase.rpc("calc_puntajes_por_intento", { p_intento: attemptId });
+        if (error) console.error("Error al calcular puntajes:", error);
+      }
+
+      // 1.1) Auditoría SOLO en consola (si ?debug=1)
+      if (attemptId && debugAudit) {
+        const { data: audit, error: auditErr } = await supabase.rpc(
+          "calc_puntajes_por_intento_resumen",
+          { p_intento: attemptId }
+        );
+        if (auditErr) {
+          console.warn("No se pudo obtener auditoría:", auditErr);
+        } else {
+          console.groupCollapsed("AUDITORÍA calc_puntajes_por_intento_resumen");
+          (audit || []).forEach((row, i) => {
+            console.groupCollapsed(`Escala ${i + 1}: ${row.escala_id}`);
+            console.table([{
+              escala_id: row.escala_id,
+              total_items: row.total_items,
+              items_respondidos: row.items_respondidos,
+              suma_raw: row.suma_raw,
+              suma_ponderada: row.suma_ponderada,
+            }]);
+            console.log("Detalle por ítem:", row.detalle);
+            console.groupEnd();
+          });
+          console.groupEnd();
         }
       }
 
@@ -574,7 +610,7 @@ export default function TestViewer() {
   }
 
   const pregunta = items[currentIndex];
-  const opciones = pregunta?.opciones?.length ? pregunta.opciones : ["Nada", "Poco", "Algo", "Mucho"];
+  const opciones = optionsForQuestion(pregunta);
   const editable = !attemptEnded && attemptState !== "evaluado";
   const botonesDeshabilitados = savingRef.current || !attemptId || !editable;
 

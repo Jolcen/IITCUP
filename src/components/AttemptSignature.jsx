@@ -1,3 +1,4 @@
+// AttemptSignature.jsx
 import { useEffect, useRef, useState } from "react";
 import "../styles/AttemptSignature.css";
 
@@ -158,6 +159,19 @@ export default function AttemptSignature({
 
     setSaving(true);
     try {
+      // 0) Idempotencia: si ya hay firma del mismo signer para este intento, salir OK (evita 409)
+      const { data: ya, error: eYa } = await supabase
+        .from("firmas_intento")
+        .select("id")
+        .eq("intento_id", attemptId)
+        .eq("firmado_por", signer)
+        .limit(1);
+      if (eYa) throw eYa;
+      if (ya && ya.length) {
+        onDone?.();
+        return;
+      }
+
       // 1) obtener paciente_id a partir del intento
       const { data: ip, error: e1 } = await supabase
         .from("intentos_prueba")
@@ -173,30 +187,24 @@ export default function AttemptSignature({
         .single();
       if (e2) throw e2;
 
-      // 2) subir evidencia (opcional)
+      // 2) subir evidencia (opcional) — nombre único + upsert:true
       let firmaPath = null;
       let mime = "image/png";
       if (uploadToStorage) {
         const blob = await canvasToBlob();
         mime = blob?.type || "image/png";
-        // nombre único
-        const ts = new Date().toISOString().replace(/[:.]/g, "");
-        const base = `attempts/${attemptId}/firma-${signer}-${ts}`;
-        const tryNames = [`${base}.png`, `${base}-1.png`, `${base}-2.png`];
+        const uid = (crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
+        const filePath = `attempts/${attemptId}/firma-${signer}-${uid}.png`;
 
-        let upErr = null;
-        for (const filePath of tryNames) {
-          const { error } = await supabase.storage
-            .from(storageBucket)
-            .upload(filePath, blob, { contentType: mime, upsert: false });
-          if (!error) { firmaPath = filePath; upErr = null; break; }
-          upErr = error;
-          if (error?.status !== 409) break; // si no es "ya existe", no reintentar
-        }
+        const { error: upErr } = await supabase.storage
+          .from(storageBucket)
+          .upload(filePath, blob, { contentType: mime, upsert: true });
         if (upErr) throw upErr;
+
+        firmaPath = filePath;
       }
 
-      // 3) insertar en firmas_intento (idempotente por índice único)
+      // 3) insertar en firmas_intento (ya prevenimos duplicados con el paso 0)
       const payload = {
         intento_id: attemptId,
         paciente_id: caso.paciente_id,
@@ -206,19 +214,7 @@ export default function AttemptSignature({
       };
 
       const { error: insErr } = await supabase.from("firmas_intento").insert(payload);
-
-      if (insErr) {
-        // duplicado por índice único
-        if (insErr.code === "23505") {
-          onDone?.();
-          return;
-        }
-        // RLS/Storage tips
-        if (insErr.code === "42501") {
-          throw new Error("No tienes permiso para firmar este intento (verifica políticas RLS).");
-        }
-        throw insErr;
-      }
+      if (insErr) throw insErr;
 
       onDone?.();
     } catch (e) {
@@ -226,6 +222,10 @@ export default function AttemptSignature({
       const hint = (e?.hint || e?.message || "").toLowerCase();
       if (hint.includes("bucket") || hint.includes("storage")) {
         setErr("No se pudo guardar la imagen en Storage. Revisa el bucket y permisos.");
+      } else if (e?.code === "23505" || e?.status === 409) {
+        // por si existe un índice único y alguien hizo doble click entre el paso 0 y el insert
+        onDone?.();
+        return;
       } else {
         setErr(e?.message || "No se pudo registrar la firma.");
       }
@@ -275,8 +275,7 @@ export default function AttemptSignature({
       {err && <div className="sig__error">{err}</div>}
 
       <p className="sig__note">
-        Al firmar, se validará que el intento esté completo y se cerrará la prueba. Si falta algo o hay un problema de permisos,
-        verás un mensaje.
+        Al firmar, se validará que el intento esté completo y se cerrará la prueba.
       </p>
     </div>
   );

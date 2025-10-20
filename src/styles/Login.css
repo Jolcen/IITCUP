@@ -132,3 +132,9 @@ body { margin: 0; }
   text-decoration: none;
 }
 .register-link a:hover { color: #092c4cb4; }
+
+.login-error { color: crimson; font-size: 12px; margin-top: 8px; }
+.login-hint { margin-top: 8px; display: grid; gap: 6px; }
+.login-link { background: transparent; border: none; color: #0b3a63; font-size: 12px; text-decoration: underline; cursor: pointer; padding: 0; }
+.login-link:hover { color: #0b3a63cc; }
+.login-ok { color: #166534; font-size: 12px; }

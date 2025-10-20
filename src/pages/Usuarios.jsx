@@ -49,13 +49,11 @@ export default function Usuarios() {
     setModoModal("crear");
     setUsuarioSeleccionado({
       nombre: "", email: "", rol: "operador",
-      estado: "disponible",
+      estado: "verificacion",
       password: "",
-      // perfil
       ci: "", telefono: "", direccion: "",
       fecha_nacimiento: "", especialidad: "", nivel: "", turno: "",
       matricula: "", institucion: "", fecha_graduacion: "",
-      disponibilidad: "Disponible",
       avatar_url: null,
     });
   };
@@ -224,11 +222,12 @@ function RolePill({ rol }) {
 
 function StatusPill({ estado }) {
   const map = {
+    verificacion:["#fff7ed", "#9a3412", "#fed7aa"],
     disponible: ["#dcfce7", "#166534", "#bbf7d0"],
+    suspendido: ["#ffe4e6", "#9f1239", "#fecdd3"],
     ocupado:    ["#fef9c3", "#854d0e", "#fde68a"],
     inactivo:   ["#e5e7eb", "#374151", "#d1d5db"],
     bloqueado:  ["#fee2e2", "#991b1b", "#fecaca"],
-    suspendido: ["#ffe4e6", "#9f1239", "#fecdd3"],
     eliminado:  ["#f3f4f6", "#6b7280", "#e5e7eb"],
   };
   const [bg, fg, bd] = map[estado] || ["#f1f5f9", "#64748b", "#e2e8f0"];
