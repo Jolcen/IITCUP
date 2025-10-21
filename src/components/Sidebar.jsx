@@ -110,8 +110,8 @@ export default function Sidebar() {
     <>
       <div className="sidebar">
         <div className="logo">
-          <img src="static/images/logo.png" alt="Logo" className="logo" />
-          <h2>IITCUP</h2>
+          
+          <h2>AMUYU</h2>
         </div>
 
         <div className="menu-section">

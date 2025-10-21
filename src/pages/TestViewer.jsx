@@ -12,8 +12,11 @@ export default function TestViewer() {
   const [sp] = useSearchParams();
   const caseId = sp.get("case") || null;
   const pacienteNombre = sp.get("nombre") || "";
-  const debugAudit = sp.get("debug") === "1";
+  const debugAudit = sp.get("debug") === "1"; // compat
   const navigate = useNavigate();
+
+  // Auditoría por localStorage: activar con localStorage.setItem('auditCalc','1')
+  const auditFlag = (typeof localStorage !== "undefined" && localStorage.getItem("auditCalc") === "1");
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -45,7 +48,6 @@ export default function TestViewer() {
   const [consentChecked, setConsentChecked] = useState(false);
 
   const storageKey = useMemo(() => (attemptId ? `attempt:${attemptId}:answers` : null), [attemptId]);
-
   const code = useMemo(() => SLUG2CODE[testId] ?? (testId || "").toUpperCase(), [testId]);
 
   // ====== TTS opcional ======
@@ -118,7 +120,6 @@ export default function TestViewer() {
     return [];
   }
 
-  // === Opciones por tipo (fallbacks seguros)
   function optionsForQuestion(q) {
     const hasCustom = Array.isArray(q?.opciones) && q.opciones.length > 0;
     if (hasCustom) return q.opciones;
@@ -126,33 +127,27 @@ export default function TestViewer() {
     if (["boolean","vf","tf","mmpi","mcmi"].some(s => t.includes(s))) {
       return ["Verdadero", "Falso"];
     }
-    return ["Nada", "Poco", "Algo", "Mucho"]; // PAI/Likert
+    return ["Nada", "Poco", "Algo", "Mucho"];
   }
 
-  // === Obtiene un número 'raw' para cualquier tipo de opción
   function getRawFromOption(q, opcionElegida) {
     const label = typeof opcionElegida === "string"
       ? opcionElegida
       : (opcionElegida?.label ?? String(opcionElegida));
-
     const norm = (s) =>
       String(s ?? "")
         .normalize("NFD").replace(/\p{Diacritic}/gu, "")
         .trim().toLowerCase();
-
     const t = norm(label);
 
-    // Booleanos (MMPI-2 / MCMI-IV)
     if (t === "verdadero" || t === "true" || t === "si" || t === "sí") return 1;
     if (t === "falso" || t === "false" || t === "no") return 0;
 
-    // Likert PAI
     if (t === "nada")  return 0;
     if (t === "poco")  return 1;
     if (t === "algo")  return 2;
     if (t === "mucho") return 3;
 
-    // Estructuras con valor numérico
     if (Array.isArray(q?.opciones)) {
       const idx = q.opciones.findIndex((o) => {
         const lbl = typeof o === "string" ? o : (o?.label ?? o?.txt ?? o?.text ?? "");
@@ -164,7 +159,7 @@ export default function TestViewer() {
           const cand = o.raw ?? o.value ?? o.score ?? o.puntaje;
           if (cand !== undefined && Number.isFinite(Number(cand))) return Number(cand);
         }
-        return idx; // fallback por índice
+        return idx;
       }
     } else if (q?.opciones && typeof q.opciones === "object") {
       for (const [key, val] of Object.entries(q.opciones)) {
@@ -180,7 +175,7 @@ export default function TestViewer() {
     return null;
   }
 
-  // ===== ensureAttempt: reutiliza si existe; crea si no hay
+  // ===== ensureAttempt
   async function ensureAttempt(pid) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Sin sesión.");
@@ -250,7 +245,7 @@ export default function TestViewer() {
         if (!alive) return;
         setPruebaId(pid);
 
-        // 2) Verificar que esté asignada
+        // 2) Verificar asignación
         if (caseId) {
           const { data: asignada, error: eAsign } = await supabase
             .from("casos_pruebas")
@@ -383,7 +378,6 @@ export default function TestViewer() {
         valor: { opcion_txt, raw },
       };
 
-      // Sin índice único: merge manual (delete → insert)
       await supabase
         .from("respuestas")
         .delete()
@@ -399,6 +393,95 @@ export default function TestViewer() {
     }
   }
 
+  // ---------- Auditoría (solo lectura, consola) ----------
+  async function auditAttempt(atid) {
+    if (!atid) return;
+
+    try {
+      // 1) Llama al resumen crudo (ya existente)
+      const { data: audit, error } = await supabase.rpc(
+        "calc_puntajes_por_intento_resumen",
+        { p_intento: atid }
+      );
+      if (error) { console.error("[AUDIT] error:", error); return; }
+      const rows = audit || [];
+      if (!rows.length) { console.warn("[AUDIT] vacío"); return; }
+
+      // 2) Enriquecer con metadatos: escalas (codigo, prueba_id)
+      const escalaIds = [...new Set(rows.map(r => r.escala_id))];
+      const { data: escs, error: eEsc } = await supabase
+        .from("escalas")
+        .select("id,codigo,prueba_id")
+        .in("id", escalaIds);
+      if (eEsc) { console.warn("[AUDIT] escalas error:", eEsc); }
+
+      const escalaMap = Object.fromEntries((escs || []).map(e => [e.id, e]));
+
+      // 3) Códigos de prueba
+      const pruebaIds = [...new Set((escs || []).map(e => e.prueba_id).filter(Boolean))];
+      const { data: prbs, error: ePrb } = await supabase
+        .from("pruebas")
+        .select("id,codigo")
+        .in("id", pruebaIds);
+      if (ePrb) { console.warn("[AUDIT] pruebas error:", ePrb); }
+      const pruebaMap = Object.fromEntries((prbs || []).map(p => [p.id, p]));
+
+      // 4) Orden de ítems
+      const itemIds = [
+        ...new Set(rows.flatMap(r => (Array.isArray(r.detalle) ? r.detalle : []).map(d => d.item_id)).filter(Boolean))
+      ];
+      const { data: its, error: eItems } = await supabase
+        .from("items_prueba")
+        .select("id,orden")
+        .in("id", itemIds);
+      if (eItems) { console.warn("[AUDIT] items error:", eItems); }
+      const itemOrder = Object.fromEntries((its || []).map(i => [i.id, i.orden]));
+
+      // 5) Log bonito
+      console.groupCollapsed("[AUDIT] calc_puntajes_por_intento_resumen", atid);
+
+      rows.forEach((row, i) => {
+        const e = escalaMap[row.escala_id];
+        const escalaCodigo  = e?.codigo || row.escala_id;
+        const pruebaCodigo  = (e?.prueba_id && pruebaMap[e.prueba_id]?.codigo) || "(?)";
+
+        console.groupCollapsed(`Escala ${i + 1}: ${escalaCodigo}  —  Prueba: ${pruebaCodigo}`);
+        console.table([{
+          escala_id: row.escala_id,
+          escala_codigo: escalaCodigo,
+          prueba_codigo: pruebaCodigo,
+          total_items: row.total_items,
+          items_respondidos: row.items_respondidos,
+          suma_raw: row.suma_raw,
+          suma_ponderada: row.suma_ponderada,
+        }]);
+
+        // detalle con 'orden' del ítem
+        const detalle = (Array.isArray(row.detalle) ? row.detalle : []).map(d => ({
+          orden: itemOrder[d.item_id] ?? null,
+          item_id: d.item_id,
+          regla: d.regla,
+          peso: d.peso,
+          v_normalizado: d.v_normalizado ?? d.v, // por compat
+          v_final: d.v_final,
+          aporte: d.aporte,
+          respondido: d.respondido,
+        })).sort((a,b) => (a.orden ?? 1e9) - (b.orden ?? 1e9));
+
+        console.log("Detalle por ítem →");
+        console.table(detalle);
+        console.groupEnd();
+      });
+
+      console.groupEnd();
+    } catch (e) {
+      console.error("[AUDIT] exception:", e);
+    }
+  }
+  // helper global opcional para disparar desde consola
+  try { window.auditCalc = () => auditAttempt(attemptId); } catch {}
+
+
   // ---------- Firma ----------
   function requestSignature() {
     setConsentChecked(false);
@@ -407,49 +490,16 @@ export default function TestViewer() {
 
   const handleSignatureDone = async () => {
     try {
-      // 1) Calcular puntajes del intento
-      if (attemptId) {
-        const { error } = await supabase.rpc("calc_puntajes_por_intento", { p_intento: attemptId });
-        if (error) console.error("Error al calcular puntajes:", error);
-      }
+      // Ya NO llamamos a finalizar_intento ni a actualizar_estado_*:
+      // el trigger AFTER INSERT en firmas_intento se encarga de calcular puntajes,
+      // cerrar el intento, marcar casos_pruebas y actualizar casos.
 
-      // 1.1) Auditoría SOLO en consola (si ?debug=1)
-      if (attemptId && debugAudit) {
-        const { data: audit, error: auditErr } = await supabase.rpc(
-          "calc_puntajes_por_intento_resumen",
-          { p_intento: attemptId }
-        );
-        if (auditErr) {
-          console.warn("No se pudo obtener auditoría:", auditErr);
-        } else {
-          console.groupCollapsed("AUDITORÍA calc_puntajes_por_intento_resumen");
-          (audit || []).forEach((row, i) => {
-            console.groupCollapsed(`Escala ${i + 1}: ${row.escala_id}`);
-            console.table([{
-              escala_id: row.escala_id,
-              total_items: row.total_items,
-              items_respondidos: row.items_respondidos,
-              suma_raw: row.suma_raw,
-              suma_ponderada: row.suma_ponderada,
-            }]);
-            console.log("Detalle por ítem:", row.detalle);
-            console.groupEnd();
-          });
-          console.groupEnd();
-        }
-      }
-
-      // 2) Marcar estado prueba/caso
-      if (pruebaId && caseId) {
-        const { error } = await supabase.rpc("actualizar_estado_prueba_y_caso", {
-          p_caso_id: caseId,
-          p_prueba_id: pruebaId,
-          p_estado: "evaluado",
-        });
-        if (error) console.warn("No se pudo marcar la prueba como evaluado:", error);
+      // Auditoría opcional (solo lectura)
+      if (attemptId && (auditFlag || debugAudit)) {
+        await auditAttempt(attemptId);
       }
     } catch (e) {
-      console.warn("RPC completar falló:", e);
+      console.warn("Post-firma falló:", e);
     }
 
     try { if (storageKey) localStorage.removeItem(storageKey); } catch {}
@@ -508,7 +558,6 @@ export default function TestViewer() {
     })();
   }
 
-  // salida: marca interrumpido y vuelve
   function requestExitToEvaluaciones() {
     openAskPassModal(async () => {
       try {

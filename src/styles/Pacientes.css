@@ -1,12 +1,39 @@
-/* src/styles/Pacientes.css */
-.pacientes-page{ margin-top: var(--topbar-h,64px); padding:16px 24px; background:#f7f8fb; min-height:calc(100vh - var(--topbar-h,64px)); }
-.pacientes-header{ display:flex; justify-content:space-between; gap:12px; margin-bottom:12px; }
-.search{ display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:8px 12px; }
-.search input{ border:none; outline:none; width:240px; }
-.card{ background:#fff; border-radius:12px; box-shadow:0 8px 24px rgba(15,23,42,.06); padding:14px 16px; }
-.pacientes-table{ width:100%; border-collapse:collapse; font-size:14px; }
-.pacientes-table th{ background:#f1f5f9; padding:12px; text-align:left; border-radius:8px; }
-.pacientes-table td{ padding:10px 12px; border-bottom:1px dashed #eef2f7; vertical-align:middle; }
-.muted{ color:#94a3b8; text-align:center; padding:18px 0; }
-.btn-primary{ background:#2563eb; color:#fff; border:0; border-radius:10px; padding:10px 12px; font-weight:700; cursor:pointer; }
-.btn-light{ background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:8px 10px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+.pacientes-page{
+  margin-top: var(--topbar-h,64px);
+  padding:16px 24px;
+  background:#f7f8fb;
+  min-height:calc(100vh - var(--topbar-h,64px));
+}
+.pacientes-header{
+  display:flex; justify-content:space-between; gap:12px; margin-bottom:12px;
+}
+.search{
+  display:flex; align-items:center; gap:8px;
+  background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:10px 12px;
+}
+.search input{ border:none; outline:none; width:260px; font-size:14px; }
+
+.card{
+  background:#fff; border-radius:14px; border:1px solid #eef2f7;
+  box-shadow:0 10px 30px rgba(15,23,42,.06); padding:10px 12px;
+}
+
+.pacientes-table{ width:100%; border-collapse:separate; border-spacing:0 6px; font-size:14px; }
+.pacientes-table thead th{
+  background:#f1f5f9; padding:12px; text-align:left; font-weight:700;
+  color:#0f172a; border-top-left-radius:10px; border-top-right-radius:10px;
+}
+.pacientes-table tbody tr{
+  background:#fff; border:1px solid #eef2f7;
+}
+.pacientes-table td{ padding:10px 12px; vertical-align:middle; }
+.pacientes-table tbody tr:hover{ box-shadow:0 6px 18px rgba(2,6,23,.06); transform: translateY(-1px); }
+
+.muted{ color:#94a3b8; }
+.btn-primary{
+  background:#2563eb; color:#fff; border:0; border-radius:10px; padding:10px 12px; font-weight:700; cursor:pointer;
+}
+.btn-light{
+  background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:8px 10px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+}
+.ellipsis{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

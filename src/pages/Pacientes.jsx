@@ -9,25 +9,25 @@ export default function Pacientes() {
   const [pacientes, setPacientes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
-  const [modal, setModal] = useState({ open:false, initial:null });
-  const [docs, setDocs] = useState({ open:false, paciente:null });
+  const [modal, setModal] = useState({ open: false, initial: null });
+  const [docs, setDocs] = useState({ open: false, paciente: null });
 
   const fetchPacientes = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("pacientes")
-      .select(`
-        id, doc_numero, doc_expedido,
-        nombres, apellidos, sexo, fecha_nacimiento,
-        contacto
-      `)
-      .order("created_at", { ascending: false });
+    try {
+      // si tu tabla no tiene created_at, cambia el order a "nombres"
+      const { data, error } = await supabase
+        .from("pacientes")
+        .select(`
+          id, doc_numero, doc_expedido,
+          nombres, apellidos, sexo, fecha_nacimiento,
+          contacto
+        `)
+        .order("created_at", { ascending: false });
 
-    if (error) {
-      console.error(error);
-      setPacientes([]);
-    } else {
-      const mapped = (data || []).map(r => ({
+      if (error) throw error;
+
+      const mapped = (data || []).map((r) => ({
         id: r.id,
         nombre: [r.nombres, r.apellidos].filter(Boolean).join(" "),
         ci: r.doc_numero || "",
@@ -40,33 +40,40 @@ export default function Pacientes() {
         _row: r,
       }));
       setPacientes(mapped);
+    } catch (err) {
+      console.error("Error cargando pacientes:", err);
+      setPacientes([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
-  useEffect(() => { fetchPacientes(); }, [fetchPacientes]);
+  useEffect(() => {
+    fetchPacientes();
+  }, [fetchPacientes]);
 
   const filtrados = useMemo(() => {
     const t = q.toLowerCase().trim();
-    return pacientes.filter(p =>
-      !t ||
-      (p.nombre?.toLowerCase().includes(t)) ||
-      (p.ci?.toLowerCase().includes(t)) ||
-      (p.email?.toLowerCase().includes(t))
+    return pacientes.filter(
+      (p) =>
+        !t ||
+        p.nombre?.toLowerCase().includes(t) ||
+        p.ci?.toLowerCase().includes(t) ||
+        p.email?.toLowerCase().includes(t)
     );
   }, [pacientes, q]);
 
-  const crear = () => setModal({ open:true, initial:null });
-  const editar = (p) => setModal({ open:true, initial:p });
-  const abrirDocs = (p) => setDocs({ open:true, paciente:p });
+  const crear = () => setModal({ open: true, initial: null });
+  const editar = (p) => setModal({ open: true, initial: p });
+  const abrirDocs = (p) => setDocs({ open: true, paciente: p });
 
   const onGuardarPaciente = async () => {
     await fetchPacientes();
-    setModal({ open:false, initial:null });
+    setModal({ open: false, initial: null });
   };
 
   const onGuardarDocs = async () => {
-    setDocs({ open:false, paciente:null });
+    setDocs({ open: false, paciente: null });
   };
 
   return (
@@ -77,11 +84,11 @@ export default function Pacientes() {
           <input
             placeholder="Buscar por nombre, CI o email…"
             value={q}
-            onChange={(e)=>setQ(e.target.value)}
+            onChange={(e) => setQ(e.target.value)}
           />
         </div>
         <button className="btn-primary" onClick={crear}>
-          <FaPlus/> Nuevo paciente
+          <FaPlus /> Nuevo paciente
         </button>
       </div>
 
@@ -100,28 +107,40 @@ export default function Pacientes() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={7} className="muted">Cargando…</td></tr>
-            )}
-            {!loading && filtrados.length===0 && (
-              <tr><td colSpan={7} className="muted">Sin pacientes</td></tr>
-            )}
-            {!loading && filtrados.map(p=>(
-              <tr key={p.id}>
-                <td>{p.nombre || "—"}</td>
-                <td>{p.ci ? `${p.ci} ${p.ci_ext || ""}` : "—"}</td>
-                <td>{p.nacimiento || "—"}</td>
-                <td>{p.genero || "—"}</td>
-                <td>{p.telefono || "—"}</td>
-                <td>
-                  <button className="btn-light" onClick={()=>abrirDocs(p)}>
-                    <FaFolderOpen/><span> Abrir</span>
-                  </button>
-                </td>
-                <td style={{textAlign:"right"}}>
-                  <button className="btn-light" onClick={()=>editar(p)}>Editar</button>
+              <tr>
+                <td colSpan={7} className="muted">
+                  Cargando…
                 </td>
               </tr>
-            ))}
+            )}
+            {!loading && filtrados.length === 0 && (
+              <tr>
+                <td colSpan={7} className="muted">
+                  Sin pacientes
+                </td>
+              </tr>
+            )}
+            {!loading &&
+              filtrados.map((p) => (
+                <tr key={p.id}>
+                  <td>{p.nombre || "—"}</td>
+                  <td>{p.ci ? `${p.ci} ${p.ci_ext || ""}` : "—"}</td>
+                  <td>{p.nacimiento || "—"}</td>
+                  <td>{p.genero || "—"}</td>
+                  <td>{p.telefono || p.email || "—"}</td>
+                  <td>
+                    <button className="btn-light" onClick={() => abrirDocs(p)}>
+                      <FaFolderOpen />
+                      <span> Abrir</span>
+                    </button>
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    <button className="btn-light" onClick={() => editar(p)}>
+                      Editar
+                    </button>
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </div>
@@ -129,7 +148,7 @@ export default function Pacientes() {
       {modal.open && (
         <ModalPaciente
           initial={modal.initial}
-          onClose={()=>setModal({open:false, initial:null})}
+          onClose={() => setModal({ open: false, initial: null })}
           onSaved={onGuardarPaciente}
         />
       )}
@@ -137,8 +156,8 @@ export default function Pacientes() {
       {docs.open && (
         <ModalDocumentosPaciente
           paciente={docs.paciente}
-          allowCase={false}       
-          onClose={()=>setDocs({open:false, paciente:null})}
+          allowCase={false}
+          onClose={() => setDocs({ open: false, paciente: null })}
           onSaved={onGuardarDocs}
         />
       )}

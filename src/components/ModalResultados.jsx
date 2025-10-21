@@ -2,7 +2,12 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { inferirIA } from "../services/ia";
+import * as XLSX from "xlsx";
 import "../styles/ModalResultados.css";
+
+// Plantillas existentes
+import paiTemplateUrl from "../assets/templates/PAI.xls?url";
+import mcmiTemplateUrl from "../assets/templates/MCMI-IV.xlsm?url";
 
 const PRUEBA_IMG = {
   PAI: "static/images/pai.jpg",
@@ -11,15 +16,54 @@ const PRUEBA_IMG = {
   DEFAULT: "static/images/testP.jpg",
 };
 
-/** Normaliza aportes (magnitud) -> % */
-function calcularPorcentajes(topFeatures = []) {
-  const mags = topFeatures.map((t) => Math.abs(t.aporte));
-  const total = mags.reduce((a, b) => a + b, 0) || 1;
-  return topFeatures.map((t) => ({
-    ...t,
-    aporte_pct: (Math.abs(t.aporte) / total) * 100,
-  }));
+/* ===== Helpers XLSX ===== */
+function getCell(ws, r, c) {
+  const addr = XLSX.utils.encode_cell({ r, c });
+  return ws[addr];
 }
+function setCell(ws, r, c, v) {
+  const addr = XLSX.utils.encode_cell({ r, c });
+  ws[addr] = { t: typeof v === "number" ? "n" : "s", v };
+}
+function ensureRange(ws, r, c) {
+  const ref = ws["!ref"] || "A1:A1";
+  const range = XLSX.utils.decode_range(ref);
+  if (r > range.e.r) range.e.r = r;
+  if (c > range.e.c) range.e.c = c;
+  ws["!ref"] = XLSX.utils.encode_range(range);
+}
+function findRowByOrden(ws, ordenColIndex, startRow0, ordenBuscado) {
+  const ref = XLSX.utils.decode_range(ws["!ref"]);
+  for (let r = startRow0; r <= ref.e.r; r++) {
+    const cell = getCell(ws, r, ordenColIndex);
+    const val = (cell?.v ?? "").toString().trim();
+    if (!val) continue;
+    if (String(val) === String(ordenBuscado)) return r;
+  }
+  return -1;
+}
+
+/* ===== Config de plantillas ===== */
+// PAI (ítems desde fila 3, marcar con X según raw 0..3 → C..F)
+const PAI_TEMPLATE = {
+  sheetName: "Hoja de Captura",
+  dataStartRow0: 2,
+  colOrden: 0, // A
+  colAF: 2,    // C (raw 0)
+  colLC: 3,    // D (raw 1)
+  colPC: 4,    // E (raw 2)
+  colMC: 5,    // F (raw 3)
+  mark: "X",
+};
+// MCMI (ítems desde fila 13, Verdadero/Falso con "1")
+const MCMI_TEMPLATE = {
+  sheetName: null,   // primera hoja
+  dataStartRow0: 12, // fila 13 (1-based)
+  colOrden: 0, // A
+  colC: 2,     // C (raw 0 → Falso)
+  colD: 3,     // D (raw 1 → Verdadero)
+  mark: "1",
+};
 
 export default function ModalResultados({ open, onClose, caso }) {
   const [loading, setLoading] = useState(false);
@@ -32,6 +76,8 @@ export default function ModalResultados({ open, onClose, caso }) {
   const [generando, setGenerando] = useState(false);
   const [perfilIA, setPerfilIA] = useState(null);
   const [perfilGuardado, setPerfilGuardado] = useState(null);
+
+  const [exportando, setExportando] = useState(false);
 
   // Carga tarjetas y último perfil
   useEffect(() => {
@@ -102,7 +148,7 @@ export default function ModalResultados({ open, onClose, caso }) {
     setPuntajes([]);
   }
 
-  // === Aliases para cuadrar con features_orden.json del modelo ===
+  // Aliases para features IA
   const ALIAS = {
     "Fp-r": "Fpsi-r",
     "FBS-r": "FVS-r",
@@ -113,7 +159,6 @@ export default function ModalResultados({ open, onClose, caso }) {
     "AC-PE": "AC/PE",
   };
 
-  // Construye features del caso con prefijos y alias
   async function recolectarFeaturesCaso() {
     const { data: fin, error } = await supabase.rpc(
       "api_pruebas_finalizadas_por_caso",
@@ -159,21 +204,9 @@ export default function ModalResultados({ open, onClose, caso }) {
         }
       }
     }
-
-    // ===== LOGS =====
-    const keys = Object.keys(features);
-    console.log("==== FEATURES ENVIADAS A IA ====");
-    console.log("Total de features:", keys.length);
-    console.log("Claves (orden alfabético):", [...keys].sort());
-    const sample = {};
-    for (const k of keys.slice(0, 10)) sample[k] = features[k];
-    console.log("Ejemplo de pares clave→valor:", sample);
-    console.log("JSON a enviar:", { explain: true, top_k: 5, debug: true, features });
-
     return features;
   }
 
-  // Generar y guardar (agrega generated_by + insights con descripcion/guia_long)
   async function generarPerfilCasoIA() {
     try {
       setGenerando(true);
@@ -183,30 +216,19 @@ export default function ModalResultados({ open, onClose, caso }) {
         explain: true, topK: 5, debug: true, log: true,
       });
 
-      // Logs de depuración del backend
-      if (resp?.explicacion?.debug) {
-        const dbg = resp.explicacion.debug;
-        console.log("DEBUG.missing_numeric:", dbg.missing_numeric);
-        console.log("DEBUG.unknown_inputs:", dbg.unknown_inputs);
-        console.log("DEBUG.used_numeric:", dbg.used_numeric);
-      }
-
-      // Usuario actual para generated_by
       const { data: udata, error: eAuth } = await supabase.auth.getUser();
       if (eAuth) throw eAuth;
       const user = udata?.user;
       if (!user?.id) throw new Error("No hay sesión activa. Inicia sesión para generar el perfil IA.");
 
-      // Armar insights (jsonb NOT NULL en tu tabla)
       const insights = {
         metodo: resp.explicacion?.metodo ?? null,
         clase_objetivo: resp.explicacion?.clase_objetivo ?? resp.perfil_clinico,
-        descripcion: resp.descripcion ?? null,           // << nuevo
-        guia_long: resp.guia?.long ?? null,              // << nuevo
+        descripcion: resp.descripcion ?? null,
+        guia_long: resp.guia?.long ?? null,
         top_features: (resp.explicacion?.top_features ?? []).map(tf => ({
           feature: tf.feature, valor: tf.valor, aporte: tf.aporte, sentido: tf.sentido
         })),
-        // Metadatos mínimos útiles:
         features_count: Object.keys(features).length,
         probabilidad: resp.probabilidad,
         version: resp.model_version,
@@ -216,12 +238,11 @@ export default function ModalResultados({ open, onClose, caso }) {
         .from("perfiles_caso")
         .insert([{
           caso_id: caso.id,
-          generated_by: user.id,       // requerido por RLS/tabla
+          generated_by: user.id,
           model_version: resp.model_version,
           perfil_clinico: resp.perfil_clinico,
           probabilidad: resp.probabilidad,
-          insights,                    // jsonb NOT NULL
-          // generated_at: new Date().toISOString(), // si no tienes DEFAULT now()
+          insights,
         }])
         .select()
         .single();
@@ -237,28 +258,196 @@ export default function ModalResultados({ open, onClose, caso }) {
     }
   }
 
-  // Visualizar (no guarda)
   async function visualizarPerfilGuardado() {
     try {
       setGenerando(true);
       const features = await recolectarFeaturesCaso();
-      const resp = await inferirIA(features, {
-        explain: true, topK: 5, debug: true, log: true,
-      });
-
-      if (resp?.explicacion?.debug) {
-        const dbg = resp.explicacion.debug;
-        console.log("DEBUG.missing_numeric:", dbg.missing_numeric);
-        console.log("DEBUG.unknown_inputs:", dbg.unknown_inputs);
-        console.log("DEBUG.used_numeric:", dbg.used_numeric);
-      }
-
+      const resp = await inferirIA(features, { explain: true, topK: 5, debug: true, log: true });
       setPerfilIA(resp);
     } catch (e) {
       console.error("visualizarPerfilGuardado", e);
       alert(e.message ?? e);
     } finally {
       setGenerando(false);
+    }
+  }
+
+  /* ====== Exportación PAI (marca X) ====== */
+  async function exportarPAIenPlantilla() {
+    if (!detalleTest?.intentoId) return;
+    try {
+      setExportando(true);
+
+      const { data, error } = await supabase.rpc("api_respuestas_excel_por_intento", {
+        p_intento_id: detalleTest.intentoId,
+      });
+      if (error) throw error;
+
+      const buf = await fetch(paiTemplateUrl).then((r) => r.arrayBuffer());
+      const wb = XLSX.read(buf, { type: "array" });
+
+      const sheetName =
+        (PAI_TEMPLATE.sheetName && wb.SheetNames.includes(PAI_TEMPLATE.sheetName))
+          ? PAI_TEMPLATE.sheetName
+          : wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      if (!ws) throw new Error(`No se encontró la hoja "${sheetName}" en la plantilla PAI.`);
+
+      for (const row of data || []) {
+        const orden = row.item_orden ?? row.item_codigo;
+        if (orden == null) continue;
+
+        const r0 = findRowByOrden(ws, PAI_TEMPLATE.colOrden, PAI_TEMPLATE.dataStartRow0, orden);
+        if (r0 < 0) continue;
+
+        const raw = (row.respuesta_json && row.respuesta_json.raw !== undefined)
+          ? Number(row.respuesta_json.raw)
+          : null;
+
+        let c = null;
+        if (Number.isFinite(raw)) {
+          if (raw === 0) c = PAI_TEMPLATE.colAF;
+          else if (raw === 1) c = PAI_TEMPLATE.colLC;
+          else if (raw === 2) c = PAI_TEMPLATE.colPC;
+          else if (raw === 3) c = PAI_TEMPLATE.colMC;
+        }
+
+        if (c != null) {
+          setCell(ws, r0, c, PAI_TEMPLATE.mark);
+          ensureRange(ws, r0, c);
+        } else {
+          const ref = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
+          const lastCol = ref.e.c + 1;
+          const txt =
+            (row.respuesta_json && (row.respuesta_json.opcion_txt || row.respuesta_json.texto)) ??
+            row.respuesta_texto ?? "";
+          setCell(ws, r0, lastCol, txt);
+          ensureRange(ws, r0, lastCol);
+        }
+      }
+
+      const safe = (s) => (s || "").replace(/[\\/:*?"<>|]+/g, "_");
+      const filename = `PAI_${safe(caso?.paciente_nombre)}_${new Date().toISOString().slice(0,10)}.xlsx`;
+      XLSX.writeFile(wb, filename);
+    } catch (e) {
+      console.error("exportarPAIenPlantilla", e);
+      alert(e.message ?? e);
+    } finally {
+      setExportando(false);
+    }
+  }
+
+  /* ====== Exportación MCMI-IV (marca 1) ====== */
+  async function exportarMCMIenPlantilla() {
+    if (!detalleTest?.intentoId) return;
+    try {
+      setExportando(true);
+
+      const { data, error } = await supabase.rpc("api_respuestas_excel_por_intento", {
+        p_intento_id: detalleTest.intentoId,
+      });
+      if (error) throw error;
+
+      const buf = await fetch(mcmiTemplateUrl).then((r) => r.arrayBuffer());
+      const wb = XLSX.read(buf, { type: "array" });
+
+      const sheetName =
+        (MCMI_TEMPLATE.sheetName && wb.SheetNames.includes(MCMI_TEMPLATE.sheetName))
+          ? MCMI_TEMPLATE.sheetName
+          : wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      if (!ws) throw new Error(`No se encontró la hoja "${sheetName}" en la plantilla MCMI.`);
+
+      for (const row of data || []) {
+        const orden = row.item_orden ?? row.item_codigo;
+        if (orden == null) continue;
+
+        const r0 = findRowByOrden(ws, MCMI_TEMPLATE.colOrden, MCMI_TEMPLATE.dataStartRow0, orden);
+        if (r0 < 0) continue;
+
+        const raw = (row.respuesta_json && row.respuesta_json.raw !== undefined)
+          ? Number(row.respuesta_json.raw)
+          : null;
+
+        let c = null;
+        if (Number.isFinite(raw)) {
+          if (raw === 0) c = MCMI_TEMPLATE.colC;   // Falso
+          else if (raw === 1) c = MCMI_TEMPLATE.colD; // Verdadero
+        }
+
+        if (c != null) {
+          setCell(ws, r0, c, MCMI_TEMPLATE.mark);
+          ensureRange(ws, r0, c);
+        } else {
+          const ref = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
+          const lastCol = ref.e.c + 1;
+          const txt =
+            (row.respuesta_json && (row.respuesta_json.opcion_txt || row.respuesta_json.texto)) ??
+            row.respuesta_texto ?? "";
+          setCell(ws, r0, lastCol, txt);
+          ensureRange(ws, r0, lastCol);
+        }
+      }
+
+      const safe = (s) => (s || "").replace(/[\\/:*?"<>|]+/g, "_");
+      const filename = `MCMI-IV_${safe(caso?.paciente_nombre)}_${new Date().toISOString().slice(0,10)}.xlsm`;
+      XLSX.writeFile(wb, filename);
+    } catch (e) {
+      console.error("exportarMCMIenPlantilla", e);
+      alert(e.message ?? e);
+    } finally {
+      setExportando(false);
+    }
+  }
+
+  /* ====== Exportación MMPI-2 (sin plantilla, hoja generada V/F) ====== */
+  async function exportarMMPIHoja() {
+    if (!detalleTest?.intentoId) return;
+    try {
+      setExportando(true);
+
+      const { data, error } = await supabase.rpc("api_respuestas_excel_por_intento", {
+        p_intento_id: detalleTest.intentoId,
+      });
+      if (error) throw error;
+
+      // Armamos AOA: encabezado + tabla (Item, Enunciado, V, F)
+      const aoa = [];
+      aoa.push([`MMPI-2 - ${caso?.paciente_nombre || ""}`]);
+      aoa.push([`Generado: ${new Date().toLocaleString()}`]);
+      aoa.push([]);
+      aoa.push(["Ítem", "Enunciado", "V", "F"]);
+
+      for (const r of data || []) {
+        const orden = r.item_orden ?? r.item_codigo ?? "";
+        const enunciado = r.item_enunciado ?? "";
+        // raw: 0 -> Falso, 1 -> Verdadero
+        const raw = (r.respuesta_json && r.respuesta_json.raw !== undefined)
+          ? Number(r.respuesta_json.raw)
+          : null;
+
+        // si en tu BD es al revés, intercambia los dos ternarios
+        const markV = Number.isFinite(raw) && raw === 1 ? "1" : "";
+        const markF = Number.isFinite(raw) && raw === 0 ? "1" : "";
+
+        aoa.push([orden, enunciado, markV, markF]);
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      // Ancho de columnas para legibilidad
+      ws["!cols"] = [{ wch: 6 }, { wch: 80 }, { wch: 4 }, { wch: 4 }];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "MMPI-2");
+
+      const safe = (s) => (s || "").replace(/[\\/:*?"<>|]+/g, "_");
+      const filename = `MMPI-2_${safe(caso?.paciente_nombre)}_${new Date().toISOString().slice(0,10)}.xlsx`;
+      XLSX.writeFile(wb, filename);
+    } catch (e) {
+      console.error("exportarMMPIHoja", e);
+      alert(e.message ?? e);
+    } finally {
+      setExportando(false);
     }
   }
 
@@ -379,13 +568,46 @@ export default function ModalResultados({ open, onClose, caso }) {
               </div>
 
               <div className="result-actions mr-detail-actions">
-                <button className="btn-soft">📄 Descargar Excel</button>
+                {detalleTest?.codigo === "PAI" && (
+                  <button
+                    className="btn-primary"
+                    onClick={exportarPAIenPlantilla}
+                    disabled={exportando}
+                    title="Rellena la plantilla PAI marcando las respuestas (X)"
+                  >
+                    {exportando ? "Rellenando…" : "📄 Descargar Excel PAI"}
+                  </button>
+                )}
+
+                {detalleTest?.codigo === "MCMI-IV" && (
+                  <button
+                    className="btn-primary"
+                    onClick={exportarMCMIenPlantilla}
+                    disabled={exportando}
+                    title="Rellena la plantilla MCMI-IV marcando las respuestas (1)"
+                    style={{ marginLeft: 8 }}
+                  >
+                    {exportando ? "Rellenando…" : "📄 Descargar Excel MCMI-IV"}
+                  </button>
+                )}
+
+                {detalleTest?.codigo === "MMPI-2" && (
+                  <button
+                    className="btn-primary"
+                    onClick={exportarMMPIHoja}
+                    disabled={exportando}
+                    title="Genera hoja MMPI-2 (V/F) y marca respuestas (1)"
+                    style={{ marginLeft: 8 }}
+                  >
+                    {exportando ? "Generando…" : "📄 Descargar Excel MMPI-2"}
+                  </button>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {/* ===== Perfil IA (vertical: chip arriba, descripción, tabla debajo) ===== */}
+        {/* ===== Perfil IA ===== */}
         {perfilIA && (
           <div
             className="modal-overlay nested"
@@ -407,7 +629,6 @@ export default function ModalResultados({ open, onClose, caso }) {
                   </div>
                 </div>
 
-                {/* Descripción corta + explicación larga */}
                 {(perfilIA.descripcion || perfilIA.guia?.long) && (
                   <div style={{ marginTop: 8 }}>
                     {perfilIA.descripcion && (

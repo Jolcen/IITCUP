@@ -119,8 +119,8 @@ export const Login = ({ setIsAuthenticated }) => {
 
         <form className="login-form" onSubmit={handleLogin}>
           <div className="login-logo">
-            <img src="static/images/logo.png" alt="IITCUP logo" className="logo" />
-            <h3>IITCUP</h3>
+            
+            <h3>AMUYU</h3>
           </div>
           <h5>Control de Pruebas Psicológicas</h5>
 
