@@ -65,6 +65,24 @@ const MCMI_TEMPLATE = {
   mark: "1",
 };
 
+/* ===== Helpers IA/UI ===== */
+// Normaliza "aportes" a porcentaje (0..100). Si no hay suma, reparte parejo.
+function calcularPorcentajes(topFeaturesRaw = []) {
+  const rows = (topFeaturesRaw || []).map((t) => ({
+    feature: t.feature ?? t.nombre ?? "",
+    valor: t.valor ?? t.value ?? "",
+    aporte: Number.isFinite(t.aporte) ? t.aporte : (Number(t.aporte) || 0),
+    sentido: t.sentido ?? t.sign ?? null,
+  }));
+  const total = rows.reduce((acc, r) => acc + Math.abs(r.aporte || 0), 0);
+  if (total > 0) {
+    return rows.map((r) => ({ ...r, aporte_pct: (Math.abs(r.aporte) * 100) / total }));
+  }
+  // si todo es 0 o vacío, repartir igual
+  const n = rows.length || 1;
+  return rows.map((r) => ({ ...r, aporte_pct: 100 / n }));
+}
+
 export default function ModalResultados({ open, onClose, caso }) {
   const [loading, setLoading] = useState(false);
   const [tests, setTests] = useState([]);
@@ -258,12 +276,32 @@ export default function ModalResultados({ open, onClose, caso }) {
     }
   }
 
+  // Ahora SÍ muestra el perfil guardado sin re-inferir
   async function visualizarPerfilGuardado() {
     try {
-      setGenerando(true);
-      const features = await recolectarFeaturesCaso();
-      const resp = await inferirIA(features, { explain: true, topK: 5, debug: true, log: true });
-      setPerfilIA(resp);
+      if (!perfilGuardado) {
+        // fallback: si no hubiera guardado por alguna razón, re-inferir
+        setGenerando(true);
+        const features = await recolectarFeaturesCaso();
+        const resp = await inferirIA(features, { explain: true, topK: 5, debug: true, log: true });
+        setPerfilIA(resp);
+        return;
+      }
+
+      const ins = perfilGuardado.insights || {};
+      const respAdaptado = {
+        perfil_clinico: perfilGuardado.perfil_clinico,
+        probabilidad: Number(perfilGuardado.probabilidad ?? ins.probabilidad ?? 0),
+        descripcion: ins.descripcion ?? null,
+        guia: ins.guia_long ? { long: ins.guia_long } : null,
+        model_version: perfilGuardado.model_version || ins.version || null,
+        explicacion: {
+          metodo: ins.metodo || null,
+          clase_objetivo: ins.clase_objetivo || perfilGuardado.perfil_clinico,
+          top_features: Array.isArray(ins.top_features) ? ins.top_features : [],
+        },
+      };
+      setPerfilIA(respAdaptado);
     } catch (e) {
       console.error("visualizarPerfilGuardado", e);
       alert(e.message ?? e);
@@ -411,7 +449,6 @@ export default function ModalResultados({ open, onClose, caso }) {
       });
       if (error) throw error;
 
-      // Armamos AOA: encabezado + tabla (Item, Enunciado, V, F)
       const aoa = [];
       aoa.push([`MMPI-2 - ${caso?.paciente_nombre || ""}`]);
       aoa.push([`Generado: ${new Date().toLocaleString()}`]);
@@ -426,7 +463,6 @@ export default function ModalResultados({ open, onClose, caso }) {
           ? Number(r.respuesta_json.raw)
           : null;
 
-        // si en tu BD es al revés, intercambia los dos ternarios
         const markV = Number.isFinite(raw) && raw === 1 ? "1" : "";
         const markF = Number.isFinite(raw) && raw === 0 ? "1" : "";
 
@@ -434,7 +470,6 @@ export default function ModalResultados({ open, onClose, caso }) {
       }
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
-      // Ancho de columnas para legibilidad
       ws["!cols"] = [{ wch: 6 }, { wch: 80 }, { wch: 4 }, { wch: 4 }];
 
       const wb = XLSX.utils.book_new();
@@ -517,7 +552,7 @@ export default function ModalResultados({ open, onClose, caso }) {
               className={`btn-primary mr-btn ${generando ? "mr-btn--disabled" : ""}`}
               onClick={visualizarPerfilGuardado}
               disabled={generando}
-              title="Solo vuelve a inferir y mostrar (no inserta en BD)"
+              title="Solo muestra el perfil IA guardado (no inserta en BD)"
             >
               {generando ? "Abriendo…" : "Visualizar perfil IA"}
             </button>
@@ -625,7 +660,7 @@ export default function ModalResultados({ open, onClose, caso }) {
                 <div className="perfil-hero">
                   <span className="perfil-chip">{perfilIA.perfil_clinico}</span>
                   <div className="conf-badge">
-                    Confianza: {(perfilIA.probabilidad * 100).toFixed(1)}%
+                    Confianza: {Number.isFinite(perfilIA.probabilidad) ? (perfilIA.probabilidad * 100).toFixed(1) : "—"}%
                   </div>
                 </div>
 
