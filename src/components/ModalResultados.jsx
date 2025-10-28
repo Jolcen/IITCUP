@@ -78,7 +78,6 @@ function calcularPorcentajes(topFeaturesRaw = []) {
   if (total > 0) {
     return rows.map((r) => ({ ...r, aporte_pct: (Math.abs(r.aporte) * 100) / total }));
   }
-  // si todo es 0 o vacío, repartir igual
   const n = rows.length || 1;
   return rows.map((r) => ({ ...r, aporte_pct: 100 / n }));
 }
@@ -91,7 +90,14 @@ export default function ModalResultados({ open, onClose, caso }) {
   const [detalleTest, setDetalleTest] = useState(null);
   const [puntajes, setPuntajes] = useState([]);
 
+  // NUEVO: control de generación + pasos
   const [generando, setGenerando] = useState(false);
+  const [progress, setProgress] = useState({
+    visible: false,
+    step: 0,
+    steps: ["Analizando escalas", "Identificando perfil", "Guardando resultado"]
+  });
+
   const [perfilIA, setPerfilIA] = useState(null);
   const [perfilGuardado, setPerfilGuardado] = useState(null);
 
@@ -225,15 +231,36 @@ export default function ModalResultados({ open, onClose, caso }) {
     return features;
   }
 
+  // NUEVO: un solo botón que decide si generar o visualizar
+  async function handlePerfilClick() {
+    if (generando) return;
+    if (perfilGuardado) {
+      await visualizarPerfilGuardado();
+    } else {
+      await generarPerfilCasoIA();
+    }
+  }
+
   async function generarPerfilCasoIA() {
+    if (perfilGuardado) return visualizarPerfilGuardado(); // seguridad extra
     try {
       setGenerando(true);
+      setProgress(p => ({ ...p, visible: true, step: 0 }));
+
+      // Paso 0: recolectar features
       const features = await recolectarFeaturesCaso();
 
+      // Paso 1: llamar IA (SIN explicación para velocidad) + timeout alto
+      setProgress(p => ({ ...p, step: 1 }));
       const resp = await inferirIA(features, {
-        explain: true, topK: 5, debug: true, log: true,
+        explain: true,       
+        debug: true,
+        log: true,
+        timeoutMs: 90000       // 90 segundos de margen
       });
 
+      // Paso 2: guardar en BD
+      setProgress(p => ({ ...p, step: 2 }));
       const { data: udata, error: eAuth } = await supabase.auth.getUser();
       if (eAuth) throw eAuth;
       const user = udata?.user;
@@ -244,9 +271,11 @@ export default function ModalResultados({ open, onClose, caso }) {
         clase_objetivo: resp.explicacion?.clase_objetivo ?? resp.perfil_clinico,
         descripcion: resp.descripcion ?? null,
         guia_long: resp.guia?.long ?? null,
-        top_features: (resp.explicacion?.top_features ?? []).map(tf => ({
-          feature: tf.feature, valor: tf.valor, aporte: tf.aporte, sentido: tf.sentido
-        })),
+        top_features: Array.isArray(resp.explicacion?.top_features)
+          ? resp.explicacion.top_features.map(tf => ({
+              feature: tf.feature, valor: tf.valor, aporte: tf.aporte, sentido: tf.sentido
+            }))
+          : [],
         features_count: Object.keys(features).length,
         probabilidad: resp.probabilidad,
         version: resp.model_version,
@@ -266,13 +295,22 @@ export default function ModalResultados({ open, onClose, caso }) {
         .single();
 
       if (eIns) throw eIns;
+
       setPerfilGuardado(ins || null);
-      setPerfilIA(resp);
+      setPerfilIA({
+        perfil_clinico: resp.perfil_clinico,
+        probabilidad: resp.probabilidad,
+        descripcion: resp.descripcion,
+        guia: resp.guia,
+        model_version: resp.model_version,
+        explicacion: resp.explicacion,
+      });
     } catch (e) {
-      console.error("generarPerfilCasoIA", e);
-      alert(e.message ?? e);
+      console.error("generarPerfilCasoIA Error:", e);
+      alert(e?.message ?? String(e));
     } finally {
       setGenerando(false);
+      setProgress(p => ({ ...p, visible: false, step: 0 }));
     }
   }
 
@@ -280,10 +318,9 @@ export default function ModalResultados({ open, onClose, caso }) {
   async function visualizarPerfilGuardado() {
     try {
       if (!perfilGuardado) {
-        // fallback: si no hubiera guardado por alguna razón, re-inferir
         setGenerando(true);
         const features = await recolectarFeaturesCaso();
-        const resp = await inferirIA(features, { explain: true, topK: 5, debug: true, log: true });
+        const resp = await inferirIA(features, { explain: false, debug: true, log: true, timeoutMs: 90000 });
         setPerfilIA(resp);
         return;
       }
@@ -304,7 +341,7 @@ export default function ModalResultados({ open, onClose, caso }) {
       setPerfilIA(respAdaptado);
     } catch (e) {
       console.error("visualizarPerfilGuardado", e);
-      alert(e.message ?? e);
+      alert(e?.message ?? String(e));
     } finally {
       setGenerando(false);
     }
@@ -369,7 +406,7 @@ export default function ModalResultados({ open, onClose, caso }) {
       XLSX.writeFile(wb, filename);
     } catch (e) {
       console.error("exportarPAIenPlantilla", e);
-      alert(e.message ?? e);
+      alert(e?.message ?? String(e));
     } finally {
       setExportando(false);
     }
@@ -432,7 +469,7 @@ export default function ModalResultados({ open, onClose, caso }) {
       XLSX.writeFile(wb, filename);
     } catch (e) {
       console.error("exportarMCMIenPlantilla", e);
-      alert(e.message ?? e);
+      alert(e?.message ?? String(e));
     } finally {
       setExportando(false);
     }
@@ -480,7 +517,7 @@ export default function ModalResultados({ open, onClose, caso }) {
       XLSX.writeFile(wb, filename);
     } catch (e) {
       console.error("exportarMMPIHoja", e);
-      alert(e.message ?? e);
+      alert(e?.message ?? String(e));
     } finally {
       setExportando(false);
     }
@@ -537,26 +574,22 @@ export default function ModalResultados({ open, onClose, caso }) {
           </div>
         )}
 
+        {/* Botón único: generar o visualizar */}
         <div className="mr-actions">
-          {!perfilGuardado ? (
-            <button
-              className={`btn-primary mr-btn ${generando ? "mr-btn--disabled" : ""}`}
-              onClick={generarPerfilCasoIA}
-              disabled={generando}
-              title="Llama a la IA y guarda el resultado"
-            >
-              {generando ? "Generando…" : "Generar perfil IA del caso"}
-            </button>
-          ) : (
-            <button
-              className={`btn-primary mr-btn ${generando ? "mr-btn--disabled" : ""}`}
-              onClick={visualizarPerfilGuardado}
-              disabled={generando}
-              title="Solo muestra el perfil IA guardado (no inserta en BD)"
-            >
-              {generando ? "Abriendo…" : "Visualizar perfil IA"}
-            </button>
-          )}
+          <button
+            className={`btn-primary mr-btn ${generando ? "mr-btn--disabled" : ""}`}
+            onClick={handlePerfilClick}
+            disabled={generando}
+            title={perfilGuardado
+              ? "Mostrar el perfil IA ya guardado"
+              : "Llamar a la IA y guardar el resultado"}
+          >
+            {generando
+              ? "Generando…"
+              : perfilGuardado
+                ? "Visualizar perfil IA"
+                : "Generar perfil IA del caso"}
+          </button>
         </div>
 
         {/* ===== Detalle de prueba ===== */}
@@ -726,6 +759,29 @@ export default function ModalResultados({ open, onClose, caso }) {
               <div className="result-actions">
                 <button className="btn-soft" onClick={() => setPerfilIA(null)}>Cerrar</button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== Overlay de pasos mientras genera ===== */}
+        {progress.visible && (
+          <div className="modal-overlay nested" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal loading-modal" onMouseDown={(e) => e.stopPropagation()}>
+              <h4 style={{ marginBottom: 12 }}>Procesando con IA</h4>
+              <ul className="progress-steps">
+                {progress.steps.map((txt, i) => {
+                  const done = i < progress.step;
+                  const active = i === progress.step;
+                  return (
+                    <li key={i} className={`step ${done ? "done" : ""} ${active ? "active" : ""}`}>
+                      <span className="dot">{done ? "✔" : active ? "…" : ""}</span>
+                      <span className="label">{txt}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="spinner" aria-label="Cargando" />
+              <p className="muted" style={{ marginTop: 8 }}>Por favor espera…</p>
             </div>
           </div>
         )}

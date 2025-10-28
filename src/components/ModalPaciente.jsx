@@ -301,10 +301,6 @@ export default function ModalPaciente({ initial, onClose, onSaved }) {
             Ocupación
             <input value={form.ocupacion} onChange={(e) => set("ocupacion", e.target.value)} />
           </label>
-          <label className="col2">
-            Antecedentes
-            <textarea value={form.antecedentes} onChange={(e) => set("antecedentes", e.target.value)} />
-          </label>
 
           <label>
             Teléfono

@@ -250,3 +250,25 @@
 
 /* Evita que cualquier h4 global viejo re-rompa el layout */
 .result-body h4 { all: unset !important; }
+
+/* Overlay de pasos y spinner */
+.loading-modal { width: 360px; padding: 22px; text-align: left; }
+.spinner {
+  width: 36px; height: 36px;
+  border: 3px solid rgba(0,0,0,.12);
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin .9s linear infinite; margin: 10px auto 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.progress-steps { list-style: none; margin: 0 0 12px; padding: 0; }
+.step { display: flex; align-items: center; gap: 8px; padding: 6px 0; color: #4b5563; }
+.step .dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 2px solid #9ca3af; color: #2563eb; font-weight: 700;
+}
+.step.active .dot { border-color: #2563eb; background: #e0ebff; }
+.step.done .dot   { border-color: #10b981; background: #d1fae5; color: #065f46; }
+.step .label { font-size: 14px; }
